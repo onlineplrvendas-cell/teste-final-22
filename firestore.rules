@@ -1,0 +1,145 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isSystemAdmin() {
+      return isSignedIn() && (
+        (hasUserDoc() && getUserDoc().role == 'admin' && getUserDoc().active == true) ||
+        request.auth.token.email == 'onlineplrvendas@gmail.com' ||
+        request.auth.token.email == 'mktflorestaverde@gmail.com' ||
+        request.auth.token.email == 'pastorbruno@casadedeus.org'
+      );
+    }
+
+    function isStaffMember() {
+      return isSystemAdmin() || (
+        isSignedIn() && (
+          !hasUserDoc() || getUserDoc().active == true
+        )
+      );
+    }
+
+    function isConexaoGeneralLeader() {
+      return isSystemAdmin() || (
+        hasUserDoc() && getUserDoc().active == true && getUserDoc().role == 'lider_conexao'
+      );
+    }
+
+    function canAccessCongregation(congregationName) {
+      return isSystemAdmin() || (
+        isStaffMember() &&
+        (congregationName in getUserDoc().assignedCongregations ||
+         getUserDoc().assignedCongregations.matches('.*' + congregationName + '.*'))
+      );
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      // User can read their own document; staff can read user documents for assignment lookups
+      allow get: if isSignedIn() && (request.auth.uid == userId || isStaffMember());
+      allow list: if isSignedIn() && isStaffMember();
+
+      // Administrators can create or user can create/update their own profile
+      allow create: if isSystemAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow update: if isSystemAdmin() || (
+        isSignedIn() && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role',
+          'assignedCongregations',
+          'assignedTeam',
+          'assignedCuricicaFamily',
+          'active'
+        ])
+      );
+      allow delete: if isSystemAdmin();
+    }
+
+    // Contacts Collection
+    match /contacts/{contactId} {
+      allow get: if isSignedIn() && isStaffMember();
+      allow list: if isSignedIn() && isStaffMember();
+
+      allow create: if isSignedIn() && isStaffMember() &&
+        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
+        request.resource.data.phone is string && request.resource.data.phone.size() > 0;
+
+      allow update: if isSignedIn() && isStaffMember();
+
+      allow delete: if isSystemAdmin();
+    }
+
+    // Conexão Jovem Participants Collection
+    match /conexao_participants/{participantId} {
+      // General leaders and admins can read all; team leaders can read their assigned team
+      allow get: if isSignedIn() && isStaffMember() && (
+        isSystemAdmin() ||
+        isConexaoGeneralLeader() ||
+        getUserDoc().role != 'lider_equipe' ||
+        resource.data.color == getUserDoc().assignedTeam
+      );
+
+      allow list: if isSignedIn() && isStaffMember();
+
+      allow create: if isSignedIn() && isStaffMember() && (
+        isSystemAdmin() ||
+        isConexaoGeneralLeader() ||
+        getUserDoc().role != 'lider_equipe' ||
+        request.resource.data.color == getUserDoc().assignedTeam
+      );
+
+      allow update: if isSignedIn() && isStaffMember() && (
+        isSystemAdmin() ||
+        isConexaoGeneralLeader() ||
+        getUserDoc().role != 'lider_equipe' ||
+        resource.data.color == getUserDoc().assignedTeam
+      );
+
+      allow delete: if isSignedIn() && (isSystemAdmin() || isConexaoGeneralLeader());
+    }
+
+    // Conexão Team Goals Collection
+    match /conexao_goals/{goalId} {
+      allow get, list: if isSignedIn() && isStaffMember();
+      allow create, update, delete: if isSystemAdmin() || isConexaoGeneralLeader();
+    }
+
+    // Interactions Collection
+    match /interactions/{interactionId} {
+      allow get, list: if isSignedIn() && isStaffMember();
+      allow create, update: if isSignedIn() && isStaffMember();
+      allow delete: if isSystemAdmin();
+    }
+
+    // Tasks Collection
+    match /tasks/{taskId} {
+      allow get, list: if isSignedIn() && isStaffMember();
+      allow create, update: if isSignedIn() && isStaffMember();
+      allow delete: if isSystemAdmin();
+    }
+
+    // Weekly Confirmations Collection
+    match /weekly_confirmations/{reportId} {
+      allow get, list: if isSignedIn() && isStaffMember();
+      allow create, update: if isSignedIn() && isStaffMember();
+      allow delete: if isSystemAdmin();
+    }
+  }
+}

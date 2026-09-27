@@ -1,0 +1,189 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Church team member profile with congregation assignments and role",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 150 },
+        "username": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "equipe", "admin_curicica", "lider_familia", "lider_conexao", "lider_equipe"] },
+        "assignedCongregations": { "type": "string", "maxLength": 200 },
+        "assignedTeam": { "type": "string", "enum": ["azul", "vermelho", "amarelo", "laranja", "turquesa", "rosa", "roxo", "bege"] },
+        "assignedCuricicaFamily": { "type": "string", "enum": ["familia_1", "familia_2", "familia_3"] },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "role", "active"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "Church person/member record belonging to a specific congregation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "normalizedPhone": { "type": "string", "maxLength": 25 },
+        "email": { "type": "string", "maxLength": 150 },
+        "neighborhood": { "type": "string", "maxLength": 100 },
+        "congregation": { "type": "string", "enum": ["Recreio", "Curicica", "Guaratiba"] },
+        "category": { "type": "string", "enum": ["Novo contato", "Visitante", "Membro"] },
+        "stage": { "type": "string", "enum": ["Aguardando primeiro contato", "1º contato feito", "Em acompanhamento", "Integrado", "Acompanhamento pausado"] },
+        "source": { "type": "string", "enum": ["Culto", "Indicação", "Instagram", "Site", "Evento", "Outro"] },
+        "curicicaFamily": { "type": "string", "enum": ["familia_1", "familia_2", "familia_3"] },
+        "assignedToId": { "type": "string", "maxLength": 128 },
+        "assignedToName": { "type": "string", "maxLength": 150 },
+        "firstVisitDate": { "type": "string", "maxLength": 30 },
+        "memberSinceDate": { "type": "string", "maxLength": 30 },
+        "initialNotes": { "type": "string", "maxLength": 2000 },
+        "confirmedThisWeek": { "type": "boolean" },
+        "confirmedNotes": { "type": "string", "maxLength": 500 },
+        "isArchived": { "type": "boolean" },
+        "archivedAt": { "type": "string", "maxLength": 40 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "congregation", "category", "stage"]
+    },
+    "ConexaoParticipant": {
+      "title": "ConexaoParticipant",
+      "description": "Youth ministry team participant, leader, sub-leader base or guest",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "color": { "type": "string", "enum": ["azul", "vermelho", "amarelo", "laranja", "turquesa", "rosa", "roxo", "bege"] },
+        "role": { "type": "string", "enum": ["lider", "sublider_base", "membro", "convidado"] },
+        "congregation": { "type": "string", "enum": ["Recreio", "Curicica", "Guaratiba"] },
+        "baseName": { "type": "string", "maxLength": 100 },
+        "baseLeaderId": { "type": "string", "maxLength": 128 },
+        "baseLeaderName": { "type": "string", "maxLength": 150 },
+        "invitedById": { "type": "string", "maxLength": 128 },
+        "invitedByName": { "type": "string", "maxLength": 150 },
+        "confirmedNextCulto": { "type": "boolean" },
+        "firstVisitDate": { "type": "string", "maxLength": 30 },
+        "points": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "contactId": { "type": "string", "maxLength": 128 },
+        "funnelStage": { "type": "string", "enum": ["novo_contato", "em_contato", "em_acompanhamento", "integrado"] },
+        "responsibleName": { "type": "string", "maxLength": 150 },
+        "lastInteraction": { "type": "string", "maxLength": 200 },
+        "nextAction": { "type": "string", "maxLength": 300 },
+        "nextReturnDate": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "color", "role", "congregation"]
+    },
+    "ConexaoTeamGoal": {
+      "title": "ConexaoTeamGoal",
+      "description": "Annual team goals by color for Conexão Jovem",
+      "type": "object",
+      "properties": {
+        "color": { "type": "string", "enum": ["azul", "vermelho", "amarelo", "laranja", "turquesa", "rosa", "roxo", "bege"] },
+        "year": { "type": "number" },
+        "targetGuests": { "type": "number" },
+        "targetGuestsMonth": { "type": "number" },
+        "targetBases": { "type": "number" },
+        "targetMembers": { "type": "number" },
+        "targetWeeklyAttendance": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["color", "year", "targetGuests", "targetWeeklyAttendance"]
+    },
+    "Interaction": {
+      "title": "Interaction",
+      "description": "Pastoral care log or communication entry with a contact",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "contactId": { "type": "string", "maxLength": 128 },
+        "congregation": { "type": "string", "enum": ["Recreio", "Curicica", "Guaratiba"] },
+        "channel": { "type": "string", "enum": ["WhatsApp", "Ligação", "Presencial", "Outro"] },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 150 },
+        "stageAtInteraction": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["contactId", "channel", "notes", "userId", "congregation"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Follow-up task or scheduled return for a contact",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "contactId": { "type": "string", "maxLength": 128 },
+        "contactName": { "type": "string", "maxLength": 150 },
+        "congregation": { "type": "string", "enum": ["Recreio", "Curicica", "Guaratiba"] },
+        "description": { "type": "string", "maxLength": 500 },
+        "assignedToId": { "type": "string", "maxLength": 128 },
+        "assignedToName": { "type": "string", "maxLength": 150 },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "status": { "type": "string", "enum": ["pending", "completed"] },
+        "completedAt": { "type": "string", "maxLength": 40 },
+        "completedBy": { "type": "string", "maxLength": 128 },
+        "createdById": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["contactId", "contactName", "congregation", "description", "dueDate", "status"]
+    },
+    "WeeklyConfirmationReport": {
+      "title": "WeeklyConfirmationReport",
+      "description": "Weekly confirmation and attendance tracking report",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "weekKey": { "type": "string", "maxLength": 30 },
+        "weekLabel": { "type": "string", "maxLength": 150 },
+        "startDate": { "type": "string", "maxLength": 30 },
+        "endDate": { "type": "string", "maxLength": 30 },
+        "congregation": { "type": "string", "maxLength": 50 },
+        "savedAt": { "type": "string", "format": "date-time" },
+        "savedBy": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["id", "weekKey", "startDate", "endDate", "congregation"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and church staff authorization"
+    },
+    "/contacts/{contactId}": {
+      "schema": { "$ref": "#/entities/Contact" },
+      "description": "Church contacts and member records"
+    },
+    "/conexao_participants/{participantId}": {
+      "schema": { "$ref": "#/entities/ConexaoParticipant" },
+      "description": "Participants, leaders, bases and guests of Conexão Jovem"
+    },
+    "/conexao_goals/{goalId}": {
+      "schema": { "$ref": "#/entities/ConexaoTeamGoal" },
+      "description": "Annual targets and goals by team color"
+    },
+    "/interactions/{interactionId}": {
+      "schema": { "$ref": "#/entities/Interaction" },
+      "description": "Interaction and conversation log history"
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Follow-up schedule and pending returns"
+    },
+    "/weekly_confirmations/{reportId}": {
+      "schema": { "$ref": "#/entities/WeeklyConfirmationReport" },
+      "description": "Weekly confirmations and attendance tracking history"
+    }
+  }
+}
