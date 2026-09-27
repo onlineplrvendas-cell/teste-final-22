@@ -29,6 +29,9 @@ import { AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
 const MainCRMApp: React.FC = () => {
   const { currentUser, isLoading, isDemoMode, toggleDemoMode } = useAuth();
   const {
+    dataError,
+    retryDataLoad,
+    isDataLoading,
     archiveContact,
     restoreContact,
     deleteContactPermanent,
@@ -289,6 +292,16 @@ const MainCRMApp: React.FC = () => {
 
         {/* Primary Page Content */}
         <main className="grow p-4 md:p-6 lg:p-8 overflow-y-auto">
+          {dataError && (
+            <div role="alert" className="mb-4 p-4 rounded-xl border border-amber-600/50 bg-amber-950/30 text-amber-100 text-sm">
+              <p className="font-semibold">Não foi possível atualizar todos os dados.</p>
+              <p className="mt-1 text-xs">{dataError}</p>
+              <p className="mt-1 text-xs">Os dados já carregados foram mantidos; os totais podem estar incompletos.</p>
+              <button type="button" onClick={retryDataLoad} disabled={isDataLoading} className="mt-3 px-3 py-1.5 border border-amber-500 rounded-lg disabled:opacity-50">
+                {isDataLoading ? 'Atualizando...' : 'Tentar novamente'}
+              </button>
+            </div>
+          )}
           {activeTab === 'dashboard' && (
             <DashboardPage
               onOpenNewContact={() => {

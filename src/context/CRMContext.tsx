@@ -29,6 +29,8 @@ import { generateEmptyConexaoMonthlyResults } from '../data/mockData';
 
 interface CRMContextType {
   isDataLoading: boolean;
+  dataError: string | null;
+  retryDataLoad: () => void;
   contacts: Contact[];
   tasks: Task[];
   interactions: Interaction[];
@@ -128,6 +130,8 @@ const initialFilterState: ContactsFilterState = {
 export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, isDemoMode, registerRealUser } = useAuth();
   const [isDataLoading, setIsDataLoading] = useState<boolean>(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   const [rawContacts, setRawContacts] = useState<Contact[]>([]);
   const [rawTasks, setRawTasks] = useState<Task[]>([]);
@@ -142,13 +146,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Compute authorized congregations for current user
   const authorizedCongregations: Congregation[] = useMemo(() => {
-    if (!currentUser) return ['Recreio', 'Curicica', 'Guaratiba'];
+    if (!currentUser) return [];
     if (currentUser.role === 'admin') {
       return ['Recreio', 'Curicica', 'Guaratiba'];
     }
-    return currentUser.assignedCongregations.length > 0
-      ? currentUser.assignedCongregations
-      : ['Recreio'];
+    return currentUser.assignedCongregations;
   }, [currentUser]);
 
   // Selected congregation filter: Non-master users CANNOT select 'all'
@@ -191,12 +193,22 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     let isMounted = true;
     const activeManager = isDemoMode ? demoManager : realManager;
+    setDataError(null);
+    if (!currentUser) {
+      setRawContacts([]); setRawTasks([]); setRawInteractions([]); setRawUsers([]);
+      setRawConexaoParticipants([]); setRawWeeklyReports([]);
+      setRawConexaoGoals({} as any); setRawConexaoMonthlyResults({} as any);
+      setSelectedContact(null); setIsContactDrawerOpen(false); setIsDataLoading(false);
+      return;
+    }
+    if (!isDemoMode) CRMService.selectRealUser(currentUser.uid);
 
     // Immediately isolate and close any open contact details on mode toggle to prevent cross-dataset leak
     setSelectedContact(null);
     setIsContactDrawerOpen(false);
 
     const loadData = () => {
+      if (!isMounted) return;
       const contacts = activeManager.getContacts();
       setRawContacts(contacts);
       setRawTasks(activeManager.getTasks());
@@ -228,9 +240,9 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!isDemoMode && CRMService.isConfigured() && currentUser) {
         setIsDataLoading(true);
         try {
-          await CRMService.loadRealDataFromFirestore();
+          await CRMService.loadRealDataFromFirestore(currentUser);
         } catch (e) {
-          console.warn('Error synchronizing Firestore records on boot:', e);
+          if (isMounted) setDataError(e instanceof Error ? e.message : 'Não foi possível atualizar os dados.');
         } finally {
           if (isMounted) setIsDataLoading(false);
         }
@@ -240,13 +252,14 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       loadData();
     };
 
+    loadData();
     syncAndSubscribe();
     const unsub = activeManager.subscribe(loadData);
     return () => {
       isMounted = false;
       unsub();
     };
-  }, [isDemoMode, currentUser]);
+  }, [isDemoMode, currentUser, reloadToken]);
 
   // Filter raw data by user authorization first (strict security & privacy boundary)
   const scopedContacts = useMemo(() => {
@@ -305,6 +318,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Conexão Participants: Team leader only sees their color; others filtered by congregation
   const scopedConexaoParticipants = useMemo(() => {
+    if (!currentUser) return [];
     return rawConexaoParticipants.filter(p => {
       // 1. Team Leader strictly restricted to their assigned team color
       if (currentUser?.role === 'lider_equipe' && currentUser.assignedTeam) {
@@ -370,12 +384,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Team members list
   const teamMembers = useMemo(() => {
-    const activeManager = isDemoMode ? demoManager : realManager;
-    return activeManager.getUsers().filter(u => {
+    return rawUsers.filter(u => {
       if (selectedCongregation === 'all') return true;
       return u.role === 'admin' || u.assignedCongregations.includes(selectedCongregation as Congregation);
     });
-  }, [selectedCongregation, isDemoMode]);
+  }, [selectedCongregation, rawUsers]);
 
   // Filtered contacts for table and search
   const filteredContacts = useMemo(() => {
@@ -867,6 +880,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <CRMContext.Provider
       value={{
         isDataLoading,
+        dataError,
+        retryDataLoad: () => setReloadToken(value => value + 1),
         contacts: scopedContacts,
         tasks: scopedTasks,
         interactions: scopedInteractions,

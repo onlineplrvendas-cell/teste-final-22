@@ -84,7 +84,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onOpenSetupInstructions })
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <div>
-                <span className="font-semibold block text-red-100">Acesso Bloqueado</span>
+                <span className="font-semibold block text-red-100">Não foi possível entrar</span>
                 <span className="text-[11px] text-red-200 leading-tight block mt-0.5">{authError}</span>
               </div>
             </div>
@@ -121,6 +121,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onOpenSetupInstructions })
               />
             </div>
           </div>
+
+          <p className="text-[11px] text-zinc-400">Se o administrador cadastrou um e-mail próprio, entre com esse e-mail.</p>
 
           {/* Password */}
           <div>

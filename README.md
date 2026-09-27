@@ -57,7 +57,7 @@ CRM web funcional e minimalista desenvolvido para a gestão pastoral, ministeria
      - `name`: string (ex: "Pastor Lucas Ramos")
      - `email`: string (ex: "onlineplrvendas@gmail.com")
      - `role`: string ("admin")
-     - `assignedCongregations`: string ("Recreio,Curicica,Guaratiba")
+     - `assignedCongregations`: array (`["Recreio", "Curicica", "Guaratiba"]`)
      - `active`: boolean (`true`)
 
 ### Passo 3: Variáveis de Ambiente
@@ -72,9 +72,9 @@ VITE_FIREBASE_APP_ID="1:123456789:web:abcdef"
 ```
 
 ### Passo 4: Publicar Regras do Firestore
-O arquivo `firestore.rules` foi gerado na raiz do projeto com ABAC completo. Para implantar via Firebase CLI:
+Confira primeiro se a conta administrativa possui seu documento `users/{UID}`, com `role: "admin"` e `active: true`. O e-mail sozinho não concede acesso administrativo. O arquivo `firebase.json` aponta para as regras da raiz. Publique-as no projeto correto via Firebase CLI:
 ```bash
-firebase deploy --only firestore:rules
+firebase deploy --only firestore:rules --project SEU_PROJECT_ID
 ```
 
 ---
@@ -85,3 +85,24 @@ firebase deploy --only firestore:rules
 - Executar servidor de desenvolvimento: `npm run dev`
 - Verificação de tipos / Lint: `npm run lint`
 - Compilar para produção: `npm run build`
+
+- Testes de regressão: `npm test`
+
+## 4. Cadastro e recuperação de acessos
+
+O ambiente real exige Firebase Authentication e um perfil válido em `users/{UID}`. Ele não cria um administrador automaticamente e não aceita usuários/senhas do cache local. O modo demonstração continua separado.
+
+- Ao criar um acesso, informe uma senha de pelo menos seis caracteres. O sistema cria uma conta em uma sessão separada, mantendo o administrador conectado, e aguarda a gravação do perfil antes de confirmar sucesso. Se a gravação falhar, tenta desfazer apenas a conta recém-criada e mostra o erro.
+- Se informar um e-mail próprio no cadastro, a pessoa entra com esse e-mail. Se deixar o campo em branco, entra com o login escolhido, associado a `login@casadedeus.org`. A lista de acessos mostra a credencial correta. Senhas reais não são exibidas nem salvas no perfil/cache.
+- Alterar nome, equipe, congregações e status não altera as credenciais do Authentication. E-mail/login ficam bloqueados na edição para evitar divergência. O próprio usuário pode trocar a senha em Segurança, confirmando a senha atual. Para e-mails reais, também pode usar a recuperação na tela de entrada. Endereços sintéticos sem caixa postal exigem recuperação pelo administrador no Firebase.
+- Para um acesso antigo que existe no Authentication mas não consegue entrar, copie o UID dessa conta e confira se existe `users/{mesmo UID}`. Corrija esse perfil pelo Firebase Console, com a função e as congregações corretas e `active` booleano. Um líder de equipe precisa de `role: "lider_equipe"` e `assignedTeam` válido; o líder geral usa `role: "lider_conexao"`. Não crie outra conta com o mesmo e-mail para contornar um perfil ausente.
+- A aplicação não recria cadastros que nunca chegaram ao Firebase. A chave antiga `casadedeus_crm_real_data_v3` permanece no navegador para recuperação manual desses registros; ela não é usada como credencial nem importada automaticamente. O cache novo é separado por UID.
+- Falhas na leitura do banco exibem um aviso com nova tentativa e preservam as coleções já carregadas. Uma coleção confirmada vazia pelo servidor pode, corretamente, limpar o cache. Cadastros de contatos e participantes só aparecem após confirmação; matrícula no Conexão grava o contato e o participante em um lote único.
+
+### Aplicação da correção
+
+Atualize o código no ambiente que executa o CRM (incluindo Google AI Studio, se for a versão em uso), mantenha as variáveis `VITE_FIREBASE_*`, confira o perfil administrativo e publique `firestore.rules` no mesmo projeto. Alterar o GitHub não publica automaticamente regras no Firebase. Não é necessário apagar coleções nem usuários existentes.
+
+Os testes automatizados usam substitutos locais do SDK para reproduzir erros de autenticação, gravação, sincronização e troca de sessão. Eles não acessam dados reais e não substituem a validação das regras implantadas e dos acessos no projeto Firebase. A revisão de isolamento completo das coleções por congregação/família no servidor é separada destas correções de cadastro e login.
+
+Referências: [estado de autenticação e gerenciamento de usuários](https://firebase.google.com/docs/auth/web/manage-users) e [consultas e regras de segurança](https://firebase.google.com/docs/firestore/security/rules-query).

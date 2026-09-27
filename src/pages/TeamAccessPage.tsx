@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
+import { loginEmail } from '../utils/userProfile';
 import { UserProfile, Congregation, UserRole, ConexaoColor } from '../types';
 import { CONEXAO_COLOR_CONFIGS } from '../utils/conexaoConfig';
 import { ConexaoLogo } from '../components/ConexaoLogo';
@@ -36,7 +37,8 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
   onEditMember,
 }) => {
   const { users, deleteUser, updateUser } = useCRM();
-  const { currentUser } = useAuth();
+  const { currentUser, isDemoMode } = useAuth();
+  const accessLogin = (user: UserProfile) => isDemoMode || (user.username && loginEmail(user.username) === user.email.toLowerCase()) ? user.username || user.email : user.email;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [activeRoleTab, setActiveRoleTab] = useState<RoleFilterTab>('all');
@@ -324,7 +326,7 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
           </thead>
           <tbody className="divide-y divide-[#1A1A1A]">
             {filteredUsers.map(user => {
-              const isMaster = user.uid === 'admin-1' || user.uid === 'master-pastorbruno';
+              const isMaster = user.uid === currentUser?.uid || user.uid === 'admin-1' || user.uid === 'master-pastorbruno';
               const isRevealed = revealedPasswords[user.uid];
 
               return (
@@ -349,7 +351,7 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
                     {renderRoleBadge(user)}
                   </td>
                   <td className="py-3.5 px-4 text-white font-mono text-xs">
-                    {user.username || user.email.split('@')[0]}
+                    {accessLogin(user)}
                   </td>
                   <td className="py-3.5 px-4">
                     {isMaster ? (
@@ -358,8 +360,9 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
                       </span>
                     ) : (
                       <div className="flex items-center gap-1.5 font-mono text-xs">
-                        <span>{isRevealed ? (user.password || '123') : '••••••••'}</span>
+                        <span>{!isDemoMode ? 'Definida no cadastro' : isRevealed ? (user.password || '123') : '••••••••'}</span>
                         <button
+                          hidden={!isDemoMode}
                           onClick={() => togglePasswordReveal(user.uid)}
                           className="text-[#666666] hover:text-white p-0.5"
                           title={isRevealed ? 'Ocultar senha' : 'Ver senha'}
@@ -432,7 +435,7 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
       {/* Cards View (Mobile) */}
       <div className="md:hidden space-y-3">
         {filteredUsers.map(user => {
-          const isMaster = user.uid === 'admin-1' || user.uid === 'master-pastorbruno';
+          const isMaster = user.uid === currentUser?.uid || user.uid === 'admin-1' || user.uid === 'master-pastorbruno';
           const isRevealed = revealedPasswords[user.uid];
 
           return (
@@ -467,7 +470,7 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
               <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-[#1A1A1A]">
                 <div>
                   <span className="text-[10px] text-[#777777] block">Login:</span>
-                  <span className="font-mono text-white">{user.username || user.email.split('@')[0]}</span>
+                  <span className="font-mono text-white">{accessLogin(user)}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-[#777777] block">Senha:</span>
@@ -477,8 +480,9 @@ export const TeamAccessPage: React.FC<TeamAccessPageProps> = ({
                     </span>
                   ) : (
                     <div className="flex items-center gap-1 font-mono text-white">
-                      <span>{isRevealed ? (user.password || '123') : '••••••'}</span>
-                      <button onClick={() => togglePasswordReveal(user.uid)} className="text-[#666666]">
+                      <span>{!isDemoMode ? 'Definida no cadastro' : isRevealed ? (user.password || '123') : '••••••'}</span>
+                      <button hidden={!isDemoMode}
+                          onClick={() => togglePasswordReveal(user.uid)} className="text-[#666666]">
                         {isRevealed ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                       </button>
                     </div>

@@ -17,6 +17,8 @@ import {
   CongregationFilter,
 } from '../types';
 import { normalizePhone } from '../utils/phone';
+import { firebaseErrorMessage, normalizeCongregations } from '../utils/userProfile';
+import { getUserPermissions } from '../utils/permissions';
 import {
   generateInitialDemoData,
   DEMO_USERS,
@@ -30,8 +32,6 @@ import {
   db,
   auth,
   isFirebaseConfigured,
-  handleFirestoreError,
-  OperationType,
 } from './firebaseConfig';
 import {
   collection,
@@ -39,8 +39,11 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  getDocs,
-  getDoc,
+  getDocsFromServer,
+  query,
+  where,
+  QueryConstraint,
+  writeBatch,
 } from 'firebase/firestore';
 
 const DEMO_STORAGE_KEY = 'casadedeus_crm_demo_data_v5';
@@ -61,6 +64,7 @@ export class PersistentDataManager {
   private storageKey: string;
   private listeners: Set<() => void> = new Set();
   private data: DataStore;
+  private revision = 0;
   private initialFactory: () => DataStore;
 
   constructor(storageKey: string, initialFactory: () => DataStore) {
@@ -70,6 +74,7 @@ export class PersistentDataManager {
   }
 
   private loadFromStorage(): DataStore {
+    if (!this.storageKey) return this.initialFactory();
     try {
       const stored = localStorage.getItem(this.storageKey);
       if (stored) {
@@ -81,54 +86,18 @@ export class PersistentDataManager {
           parsed.conexaoGoals = this.initialFactory().conexaoGoals || generateInitialConexaoGoals();
         }
         if (!parsed.conexaoMonthlyResults) {
-          parsed.conexaoMonthlyResults = this.storageKey === REAL_STORAGE_KEY ? generateEmptyConexaoMonthlyResults() : generateInitialConexaoMonthlyResults();
+          parsed.conexaoMonthlyResults = this.storageKey.startsWith(REAL_STORAGE_KEY) ? generateEmptyConexaoMonthlyResults() : generateInitialConexaoMonthlyResults();
         }
-        if (this.storageKey === REAL_STORAGE_KEY && (!parsed.conexaoParticipants || parsed.conexaoParticipants.length === 0)) {
+        if (this.storageKey.startsWith(REAL_STORAGE_KEY) && (!parsed.conexaoParticipants || parsed.conexaoParticipants.length === 0)) {
           parsed.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
         }
         if (!parsed.weeklyReports) {
           parsed.weeklyReports = this.initialFactory().weeklyReports || [];
         }
-        if (this.storageKey === REAL_STORAGE_KEY) {
-          if (!parsed.users || !Array.isArray(parsed.users) || parsed.users.length === 0) {
-            parsed.users = this.initialFactory().users || [];
-          } else {
-            const hasMaster = parsed.users.some(
-              (u: any) =>
-                u.username?.toLowerCase() === 'pastorbruno' ||
-                u.email?.toLowerCase() === 'pastorbruno@casadedeus.org'
-            );
-            if (!hasMaster) {
-              parsed.users.unshift({
-                uid: 'master-pastorbruno',
-                name: 'Pr. Bruno Bitencourt',
-                email: 'pastorbruno@casadedeus.org',
-                username: 'Pastorbruno',
-                password: '123456',
-                role: 'admin',
-                assignedCongregations: ['Recreio', 'Curicica', 'Guaratiba'],
-                active: true,
-                createdAt: '2026-01-01T00:00:00.000Z',
-              });
-            } else {
-              // Ensure master has password '123456' and is active admin
-              parsed.users = parsed.users.map((u: any) => {
-                if (
-                  u.username?.toLowerCase() === 'pastorbruno' ||
-                  u.email?.toLowerCase() === 'pastorbruno@casadedeus.org'
-                ) {
-                  return {
-                    ...u,
-                    username: 'Pastorbruno',
-                    password: '123456',
-                    role: 'admin',
-                    active: true,
-                  };
-                }
-                return u;
-              });
-            }
-          }
+        if (this.storageKey.startsWith(REAL_STORAGE_KEY)) {
+          parsed.users = (Array.isArray(parsed.users) ? parsed.users : [])
+            .filter((user: UserProfile) => user.uid !== 'master-pastorbruno')
+            .map(({ password: _password, ...user }: UserProfile) => user);
         }
         return parsed;
       }
@@ -141,6 +110,7 @@ export class PersistentDataManager {
   }
 
   private saveToStorage(data: DataStore) {
+    if (!this.storageKey) return;
     try {
       localStorage.setItem(this.storageKey, JSON.stringify(data));
     } catch (e) {
@@ -149,6 +119,7 @@ export class PersistentDataManager {
   }
 
   public notify() {
+    this.revision++;
     this.saveToStorage(this.data);
     this.listeners.forEach(fn => fn());
   }
@@ -158,6 +129,19 @@ export class PersistentDataManager {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  public useStorageKey(storageKey: string) {
+    if (storageKey === this.storageKey) return;
+    this.storageKey = storageKey;
+    this.data = this.loadFromStorage();
+    this.revision++;
+  }
+
+  public getRevision() { return this.revision; }
+
+  public createDraft(): PersistentDataManager {
+    return new PersistentDataManager('', () => structuredClone(this.data));
   }
 
   public setAllData(newData: Partial<DataStore>) {
@@ -613,10 +597,10 @@ export class PersistentDataManager {
 
   public getConexaoMonthlyResults(): Record<ConexaoColor, ConexaoMonthlyResult[]> {
     if (!this.data.conexaoMonthlyResults) {
-      this.data.conexaoMonthlyResults = this.storageKey === REAL_STORAGE_KEY ? generateEmptyConexaoMonthlyResults() : generateInitialConexaoMonthlyResults();
+      this.data.conexaoMonthlyResults = this.storageKey.startsWith(REAL_STORAGE_KEY) ? generateEmptyConexaoMonthlyResults() : generateInitialConexaoMonthlyResults();
       this.saveToStorage(this.data);
     }
-    if (this.storageKey === REAL_STORAGE_KEY && (!this.data.conexaoParticipants || this.data.conexaoParticipants.length === 0)) {
+    if (this.storageKey.startsWith(REAL_STORAGE_KEY) && (!this.data.conexaoParticipants || this.data.conexaoParticipants.length === 0)) {
       this.data.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
     }
     return this.data.conexaoMonthlyResults;
@@ -642,7 +626,7 @@ export class PersistentDataManager {
 
   public getWeeklyReports(congregation?: CongregationFilter): WeeklyConfirmationReport[] {
     if (!this.data.weeklyReports) {
-      this.data.weeklyReports = this.storageKey === REAL_STORAGE_KEY ? [] : generateInitialWeeklyReports();
+      this.data.weeklyReports = this.storageKey.startsWith(REAL_STORAGE_KEY) ? [] : generateInitialWeeklyReports();
       this.saveToStorage(this.data);
     }
     if (!congregation || congregation === 'all') {
@@ -653,7 +637,7 @@ export class PersistentDataManager {
 
   public getWeeklyReport(weekKey: string, congregation: CongregationFilter): WeeklyConfirmationReport | undefined {
     if (!this.data.weeklyReports) {
-      this.data.weeklyReports = this.storageKey === REAL_STORAGE_KEY ? [] : generateInitialWeeklyReports();
+      this.data.weeklyReports = this.storageKey.startsWith(REAL_STORAGE_KEY) ? [] : generateInitialWeeklyReports();
       this.saveToStorage(this.data);
     }
     return this.data.weeklyReports.find(r => r.weekKey === weekKey && r.congregation === congregation);
@@ -706,19 +690,7 @@ export const realManager = new PersistentDataManager(REAL_STORAGE_KEY, () => {
     interactions: [],
     tasks: [],
     weeklyReports: [],
-    users: [
-      {
-        uid: 'master-pastorbruno',
-        name: 'Pr. Bruno Bitencourt',
-        email: 'pastorbruno@casadedeus.org',
-        username: 'Pastorbruno',
-        password: '123456',
-        role: 'admin',
-        assignedCongregations: ['Recreio', 'Curicica', 'Guaratiba'],
-        active: true,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-    ],
+    users: [],
     conexaoParticipants: [],
     conexaoGoals: generateInitialConexaoGoals(),
     conexaoMonthlyResults: generateEmptyConexaoMonthlyResults(),
@@ -749,6 +721,14 @@ export function cleanFirestoreData<T>(obj: T): T {
   return obj;
 }
 
+let loadRevision = 0;
+
+function requireRealSession(): true {
+  if (!isFirebaseConfigured || !db) throw new Error('O Firebase não está configurado. O cadastro não foi salvo.');
+  if (!auth?.currentUser) throw new Error('Sua sessão expirou. Entre novamente antes de salvar.');
+  return true;
+}
+
 /**
  * Service bridge routing writes to Demo or Real Firestore
  */
@@ -757,133 +737,68 @@ export const CRMService = {
     return isFirebaseConfigured && !!db;
   },
 
-  /**
-   * Fetches official data from Cloud Firestore to populate realManager.
-   * Enforces zero reliance on previous browser cache.
-   */
-  async loadRealDataFromFirestore(): Promise<void> {
-    if (!db || !auth?.currentUser) return;
+  selectRealUser(uid: string) {
+    // Preserve the legacy cache for manual recovery, but never share it between accounts.
+    realManager.useStorageKey(`${REAL_STORAGE_KEY}:${uid}`);
+  },
 
-    try {
-      // 1. Users
-      const users: UserProfile[] = [];
-      try {
-        const usersSnap = await getDocs(collection(db, 'users'));
-        usersSnap.forEach(d => {
-          users.push(d.data() as UserProfile);
-        });
-      } catch (err) {
-        console.warn('Could not read users collection from Firestore:', err);
-      }
+  async loadRealDataFromFirestore(profile: UserProfile): Promise<void> {
+    requireRealSession();
+    if (auth!.currentUser!.uid !== profile.uid) throw new Error('A sessão mudou. Entre novamente.');
+    const requestRevision = ++loadRevision;
+    const managerRevision = realManager.getRevision();
+    const changes: Partial<DataStore> = {};
+    const failures: string[] = [];
+    const permissions = getUserPermissions(profile);
+    const congregationConstraints: QueryConstraint[] = profile.role === 'admin' ? [] : [where('congregation', 'in', profile.assignedCongregations)];
+    const read = async (name: string, constraints: QueryConstraint[] = []) => {
+      const snapshot = await getDocsFromServer(query(collection(db!, name), ...constraints));
+      return snapshot.docs.map(item => ({ ...item.data(), [name === 'users' ? 'uid' : 'id']: item.id }));
+    };
+    const collect = async (label: string, task: () => Promise<void>) => {
+      try { await task(); }
+      catch (error) { failures.push(label + ': ' + firebaseErrorMessage(error)); }
+    };
+    const requests: Promise<void>[] = [];
+    if (profile.role === 'admin') {
+      requests.push(collect('Equipe', async () => {
+        changes.users = (await read('users')).map(({ password: _password, ...user }: any) => ({ ...user, assignedCongregations: normalizeCongregations(user.assignedCongregations) }));
+      }));
+    } else changes.users = [profile];
 
-      // 2. Contacts
-      const contacts: Contact[] = [];
-      try {
-        const contactsSnap = await getDocs(collection(db, 'contacts'));
-        contactsSnap.forEach(d => {
-          contacts.push(d.data() as Contact);
-        });
-      } catch (err) {
-        console.warn('Could not read contacts collection from Firestore:', err);
-      }
-
-      // 3. Conexao Participants
-      const conexaoParticipants: ConexaoParticipant[] = [];
-      try {
-        const conexaoSnap = await getDocs(collection(db, 'conexao_participants'));
-        conexaoSnap.forEach(d => {
-          conexaoParticipants.push(d.data() as ConexaoParticipant);
-        });
-      } catch (err) {
-        console.warn('Could not read conexao_participants from Firestore:', err);
-      }
-
-      // 4. Tasks
-      const tasks: Task[] = [];
-      try {
-        const tasksSnap = await getDocs(collection(db, 'tasks'));
-        tasksSnap.forEach(d => {
-          tasks.push(d.data() as Task);
-        });
-      } catch (err) {
-        console.warn('Could not read tasks from Firestore:', err);
-      }
-
-      // 5. Interactions
-      const interactions: Interaction[] = [];
-      try {
-        const intSnap = await getDocs(collection(db, 'interactions'));
-        intSnap.forEach(d => {
-          interactions.push(d.data() as Interaction);
-        });
-      } catch (err) {
-        console.warn('Could not read interactions from Firestore:', err);
-      }
-
-      // 6. Weekly reports
-      const weeklyReports: WeeklyConfirmationReport[] = [];
-      try {
-        const reportsSnap = await getDocs(collection(db, 'weekly_confirmations'));
-        reportsSnap.forEach(d => {
-          weeklyReports.push(d.data() as WeeklyConfirmationReport);
-        });
-      } catch (err) {
-        console.warn('Could not read weekly_confirmations from Firestore:', err);
-      }
-
-      // 7. Goals
-      const conexaoGoals: Record<ConexaoColor, ConexaoTeamGoal> = generateInitialConexaoGoals();
-      try {
-        const goalsSnap = await getDocs(collection(db, 'conexao_goals'));
-        goalsSnap.forEach(d => {
-          const g = d.data() as ConexaoTeamGoal;
-          if (g.color) {
-            conexaoGoals[g.color] = g;
-          }
-        });
-      } catch (err) {
-        console.warn('Could not read conexao_goals from Firestore:', err);
-      }
-
-      // Ensure Master user is present
-      const currentUsers = realManager.getUsers();
-      let mergedUsers = users.length > 0 ? users : currentUsers;
-      const hasMaster = mergedUsers.some(
-        u => u.username?.toLowerCase() === 'pastorbruno' || u.email?.toLowerCase() === 'pastorbruno@casadedeus.org'
-      );
-      if (!hasMaster) {
-        mergedUsers = [
-          {
-            uid: 'master-pastorbruno',
-            name: 'Pr. Bruno Bitencourt',
-            email: 'pastorbruno@casadedeus.org',
-            username: 'Pastorbruno',
-            password: '123456',
-            role: 'admin',
-            assignedCongregations: ['Recreio', 'Curicica', 'Guaratiba'],
-            active: true,
-            createdAt: '2026-01-01T00:00:00.000Z',
-          },
-          ...mergedUsers,
-        ];
-      }
-
-      realManager.setAllData({
-        users: mergedUsers,
-        contacts,
-        conexaoParticipants,
-        tasks,
-        interactions,
-        weeklyReports,
-        conexaoGoals,
-        conexaoMonthlyResults:
-          conexaoParticipants.length === 0
-            ? generateEmptyConexaoMonthlyResults()
-            : realManager.getConexaoMonthlyResults(),
-      });
-    } catch (err) {
-      console.warn('Warning during Firestore synchronization:', err);
+    if (permissions.canAccessContacts) {
+      const constraints = profile.role === 'lider_familia'
+        ? [...congregationConstraints, where('curicicaFamily', '==', profile.assignedCuricicaFamily)]
+        : congregationConstraints;
+      requests.push(collect('Contatos', async () => { changes.contacts = await read('contacts', constraints) as Contact[]; }));
+      requests.push(collect('Tarefas', async () => { changes.tasks = await read('tasks', congregationConstraints) as Task[]; }));
+      requests.push(collect('Interações', async () => { changes.interactions = await read('interactions', congregationConstraints) as Interaction[]; }));
+      requests.push(collect('Confirmações', async () => { changes.weeklyReports = await read('weekly_confirmations', congregationConstraints) as WeeklyConfirmationReport[]; }));
+    } else {
+      changes.contacts = []; changes.tasks = []; changes.interactions = []; changes.weeklyReports = [];
     }
+    if (permissions.canAccessConexao) {
+      const constraints = profile.role === 'lider_equipe' ? [where('color', '==', profile.assignedTeam)] : [];
+      requests.push(collect('Conexão', async () => { changes.conexaoParticipants = await read('conexao_participants', constraints) as ConexaoParticipant[]; }));
+      requests.push(collect('Metas', async () => {
+        const goals = generateInitialConexaoGoals();
+        for (const goal of await read('conexao_goals', constraints) as unknown as ConexaoTeamGoal[]) {
+          if (goal.color) goals[goal.color] = goal;
+        }
+        changes.conexaoGoals = goals;
+      }));
+    } else {
+      changes.conexaoParticipants = [];
+      changes.conexaoGoals = generateInitialConexaoGoals();
+    }
+    await Promise.all(requests);
+    // A completed read from an older session must never replace the current user's data.
+    if (requestRevision !== loadRevision || auth?.currentUser?.uid !== profile.uid) return;
+    if (managerRevision !== realManager.getRevision()) throw new Error('Os dados foram alterados durante a consulta. Atualize novamente para concluir o carregamento.');
+    if (changes.conexaoParticipants?.length === 0) changes.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
+    // Only successfully read collections replace their cache; a failed read is not an empty collection.
+    realManager.setAllData(changes);
+    if (failures.length) throw new Error(failures.join(' '));
   },
 
   async createContact(
@@ -903,12 +818,13 @@ export const CRMService = {
       updatedAt: now,
     };
 
-    if (db && auth?.currentUser) {
+    if (requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', newId);
+        const docRef = doc(db!, 'contacts', newId);
         await setDoc(docRef, cleanFirestoreData(contactToSave));
       } catch (error) {
         console.warn('Firestore write warning for contacts:', error);
+        throw new Error(firebaseErrorMessage(error));
       }
     }
 
@@ -924,12 +840,13 @@ export const CRMService = {
       return demoManager.updateContact(id, updates);
     }
 
-    if (db && auth?.currentUser) {
+    if (requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({ ...updates, updatedAt: new Date().toISOString() }), { merge: true });
       } catch (error) {
         console.warn('Firestore update warning for contacts:', error);
+        throw new Error(firebaseErrorMessage(error));
       }
     }
 
@@ -942,9 +859,9 @@ export const CRMService = {
     if (!current) throw new Error('Contato não encontrado');
     const newStatus = !current.confirmedThisWeek;
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           confirmedThisWeek: newStatus,
           confirmedNotes: newStatus ? 'Confirmou presença para o culto desta semana' : null,
@@ -952,6 +869,7 @@ export const CRMService = {
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore toggleWeeklyConfirmation warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -970,21 +888,23 @@ export const CRMService = {
     isDemo: boolean
   ): Promise<Contact> {
     const manager = isDemo ? demoManager : realManager;
-    const updated = manager.enrollInUniReino(id, enrollment);
+    if (!isDemo) requireRealSession();
+    const updated = (isDemo ? manager : manager.createDraft()).enrollInUniReino(id, enrollment);
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           uniReino: updated.uniReino,
           updatedAt: new Date().toISOString(),
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore enrollInUniReino warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
-    return updated;
+    return isDemo ? updated : realManager.updateContact(id, { uniReino: updated.uniReino });
   },
 
   async updateUniReino(
@@ -993,107 +913,99 @@ export const CRMService = {
     isDemo: boolean
   ): Promise<Contact> {
     const manager = isDemo ? demoManager : realManager;
-    const updated = manager.updateUniReino(id, updates);
+    if (!isDemo) requireRealSession();
+    const updated = (isDemo ? manager : manager.createDraft()).updateUniReino(id, updates);
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           uniReino: updated.uniReino,
           updatedAt: new Date().toISOString(),
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore updateUniReino warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
-    return updated;
+    return isDemo ? updated : realManager.updateContact(id, { uniReino: updated.uniReino });
   },
 
   async advanceUniReinoSemester(id: string, isDemo: boolean): Promise<Contact> {
     const manager = isDemo ? demoManager : realManager;
-    const updated = manager.advanceUniReinoSemester(id);
+    if (!isDemo) requireRealSession();
+    const updated = (isDemo ? manager : manager.createDraft()).advanceUniReinoSemester(id);
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           uniReino: updated.uniReino,
           updatedAt: new Date().toISOString(),
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore advanceUniReinoSemester warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
-    return updated;
+    return isDemo ? updated : realManager.updateContact(id, { uniReino: updated.uniReino });
   },
 
   async unenrollFromUniReino(id: string, isDemo: boolean): Promise<Contact> {
     const manager = isDemo ? demoManager : realManager;
-    const updated = manager.unenrollFromUniReino(id);
+    if (!isDemo) requireRealSession();
+    const updated = (isDemo ? manager : manager.createDraft()).unenrollFromUniReino(id);
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           uniReino: null,
           updatedAt: new Date().toISOString(),
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore unenrollFromUniReino warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
-    return updated;
+    return isDemo ? updated : realManager.updateContact(id, { uniReino: updated.uniReino });
   },
 
-  async enrollInConexao(
-    id: string,
-    membership: ConexaoMembership,
-    isDemo: boolean
-  ): Promise<Contact> {
-    const manager = isDemo ? demoManager : realManager;
-    const updated = manager.enrollInConexao(id, membership);
-
-    if (!isDemo && db && auth?.currentUser) {
-      try {
-        const docRef = doc(db, 'contacts', id);
-        await setDoc(docRef, cleanFirestoreData({
-          conexaoJovem: updated.conexaoJovem,
-          updatedAt: new Date().toISOString(),
-        }), { merge: true });
-      } catch (e) {
-        console.warn('Firestore enrollInConexao warning:', e);
-      }
-    }
-
-    return updated;
+  async enrollInConexao(id: string, membership: ConexaoMembership, isDemo: boolean): Promise<Contact> {
+    if (isDemo) return demoManager.enrollInConexao(id, membership);
+    requireRealSession();
+    const draft = realManager.createDraft();
+    const updated = draft.enrollInConexao(id, membership);
+    const participant = draft.getConexaoParticipants().find(item => item.contactId === id)!;
+    const batch = writeBatch(db!);
+    batch.set(doc(db!, 'contacts', id), cleanFirestoreData({ conexaoJovem: membership, updatedAt: updated.updatedAt }), { merge: true });
+    batch.set(doc(db!, 'conexao_participants', participant.id), cleanFirestoreData(participant));
+    try { await batch.commit(); }
+    catch (error) { throw new Error(firebaseErrorMessage(error)); }
+    realManager.addConexaoParticipant(participant);
+    return realManager.updateContact(id, { conexaoJovem: membership });
   },
 
   async unenrollFromConexao(id: string, isDemo: boolean): Promise<Contact> {
-    const manager = isDemo ? demoManager : realManager;
-    const updated = manager.unenrollFromConexao(id);
-
-    if (!isDemo && db && auth?.currentUser) {
-      try {
-        const docRef = doc(db, 'contacts', id);
-        await setDoc(docRef, cleanFirestoreData({
-          conexaoJovem: null,
-          updatedAt: new Date().toISOString(),
-        }), { merge: true });
-      } catch (e) {
-        console.warn('Firestore unenrollFromConexao warning:', e);
-      }
+    if (isDemo) return demoManager.unenrollFromConexao(id);
+    requireRealSession();
+    const batch = writeBatch(db!);
+    batch.set(doc(db!, 'contacts', id), { conexaoJovem: null, updatedAt: new Date().toISOString() }, { merge: true });
+    for (const participant of realManager.getConexaoParticipants().filter(item => item.contactId === id)) {
+      batch.delete(doc(db!, 'conexao_participants', participant.id));
     }
-
-    return updated;
+    try { await batch.commit(); }
+    catch (error) { throw new Error(firebaseErrorMessage(error)); }
+    return realManager.unenrollFromConexao(id);
   },
 
   async archiveContact(id: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           isArchived: true,
           archivedAt: new Date().toISOString(),
@@ -1101,6 +1013,7 @@ export const CRMService = {
         }), { merge: true });
       } catch (error) {
         console.warn('Firestore archiveContact warning:', error);
+        throw new Error(firebaseErrorMessage(error));
       }
     }
 
@@ -1109,9 +1022,9 @@ export const CRMService = {
   },
 
   async restoreContact(id: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           isArchived: false,
           archivedAt: null,
@@ -1119,6 +1032,7 @@ export const CRMService = {
         }), { merge: true });
       } catch (error) {
         console.warn('Firestore restoreContact warning:', error);
+        throw new Error(firebaseErrorMessage(error));
       }
     }
 
@@ -1127,12 +1041,13 @@ export const CRMService = {
   },
 
   async deleteContactPermanent(id: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'contacts', id);
+        const docRef = doc(db!, 'contacts', id);
         await deleteDoc(docRef);
       } catch (error) {
         console.warn('Firestore deleteContactPermanent warning:', error);
+        throw new Error(firebaseErrorMessage(error));
       }
     }
 
@@ -1156,13 +1071,14 @@ export const CRMService = {
       createdAt: now,
     };
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const colRef = collection(db, 'interactions');
+        const colRef = collection(db!, 'interactions');
         const docRef = doc(colRef, newId);
         await setDoc(docRef, cleanFirestoreData(interactionToSave));
       } catch (e) {
         console.warn('Firestore write warning for interactions:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1186,13 +1102,14 @@ export const CRMService = {
       updatedAt: now,
     };
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const colRef = collection(db, 'tasks');
+        const colRef = collection(db!, 'tasks');
         const docRef = doc(colRef, newId);
         await setDoc(docRef, cleanFirestoreData(taskToSave));
       } catch (e) {
         console.warn('Firestore write warning for tasks:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1208,12 +1125,13 @@ export const CRMService = {
       return demoManager.updateTask(id, updates);
     }
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'tasks', id);
+        const docRef = doc(db!, 'tasks', id);
         await setDoc(docRef, cleanFirestoreData({ ...updates, updatedAt: new Date().toISOString() }), { merge: true });
       } catch (e) {
         console.warn('Firestore update warning for tasks:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1221,12 +1139,13 @@ export const CRMService = {
   },
 
   async deleteTask(id: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'tasks', id);
+        const docRef = doc(db!, 'tasks', id);
         await deleteDoc(docRef);
       } catch (e) {
         console.warn('Firestore delete warning for tasks:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1239,7 +1158,8 @@ export const CRMService = {
       return demoManager.addUser(user);
     }
 
-    const assignedUid = user.uid || `u-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    if (!user.uid) throw new Error('Crie a conta no Firebase Authentication antes de salvar o perfil.');
+    const assignedUid = user.uid;
 
     // Do NOT store password in Firestore document!
     const { password: _pw, ...cleanProfile } = user as any;
@@ -1250,40 +1170,47 @@ export const CRMService = {
       createdAt: cleanProfile.createdAt || now,
     };
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'users', assignedUid);
+        const docRef = doc(db!, 'users', assignedUid);
         await setDoc(docRef, cleanFirestoreData(userDocData));
       } catch (e) {
         console.warn('Firestore write warning for users:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
-    return realManager.addUser({ ...userDocData, password: _pw });
+    return realManager.addUser(userDocData);
   },
 
   async updateUser(uid: string, updates: Partial<UserProfile>, isDemo: boolean): Promise<UserProfile> {
-    if (!isDemo && db && auth?.currentUser) {
-      try {
-        const { password: _pw, ...cleanUpdates } = updates as any;
-        const docRef = doc(db, 'users', uid);
-        await setDoc(docRef, cleanFirestoreData(cleanUpdates), { merge: true });
-      } catch (e) {
-        console.warn('Firestore update warning for users:', e);
-      }
+    if (isDemo) return demoManager.updateUser(uid, updates);
+    requireRealSession();
+    const current = realManager.getUsers().find(user => user.uid === uid);
+    if (!current) throw new Error('Acesso não encontrado. Atualize a lista.');
+    if (uid === auth!.currentUser!.uid && current.role === 'admin' && (updates.active === false || (updates.role !== undefined && updates.role !== 'admin'))) {
+      throw new Error('Você não pode desativar ou remover a função de administrador do próprio acesso. Para testar outra função, crie outro usuário.');
     }
-
-    const manager = isDemo ? demoManager : realManager;
-    return manager.updateUser(uid, updates);
+    if ((updates.email !== undefined && updates.email !== current.email) ||
+        (updates.username !== undefined && updates.username !== current.username) || updates.password) {
+      throw new Error('Login, e-mail e senha não podem ser alterados apenas no perfil. Use a recuperação de senha ou ajuste a conta no Firebase Authentication.');
+    }
+    const { password: _password, uid: _uid, ...cleanUpdates } = updates;
+    try {
+      await setDoc(doc(db!, 'users', uid), cleanFirestoreData(cleanUpdates), { merge: true });
+    } catch (error) { throw new Error(firebaseErrorMessage(error)); }
+    return realManager.updateUser(uid, cleanUpdates);
   },
 
   async deleteUser(uid: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && uid === auth?.currentUser?.uid) throw new Error('Você não pode excluir o próprio acesso.');
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'users', uid);
+        const docRef = doc(db!, 'users', uid);
         await deleteDoc(docRef);
       } catch (e) {
         console.warn('Firestore delete warning for users:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1327,12 +1254,13 @@ export const CRMService = {
       updatedAt: now,
     };
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'conexao_participants', newId);
+        const docRef = doc(db!, 'conexao_participants', newId);
         await setDoc(docRef, cleanFirestoreData(participantToSave));
       } catch (e) {
         console.warn('Firestore write warning for conexao_participants:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1344,12 +1272,13 @@ export const CRMService = {
     updates: Partial<ConexaoParticipant>,
     isDemo: boolean
   ): Promise<ConexaoParticipant> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'conexao_participants', id);
+        const docRef = doc(db!, 'conexao_participants', id);
         await setDoc(docRef, cleanFirestoreData({ ...updates, updatedAt: new Date().toISOString() }), { merge: true });
       } catch (e) {
         console.warn('Firestore update warning for conexao_participants:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1358,12 +1287,13 @@ export const CRMService = {
   },
 
   async deleteConexaoParticipant(id: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'conexao_participants', id);
+        const docRef = doc(db!, 'conexao_participants', id);
         await deleteDoc(docRef);
       } catch (e) {
         console.warn('Firestore delete warning for conexao_participants:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1379,9 +1309,9 @@ export const CRMService = {
     const newPoints = newStatus ? (current.points || 0) + 30 : Math.max(0, (current.points || 0) - 30);
     const now = new Date().toISOString();
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'conexao_participants', id);
+        const docRef = doc(db!, 'conexao_participants', id);
         await setDoc(docRef, cleanFirestoreData({
           confirmedNextCulto: newStatus,
           points: newPoints,
@@ -1389,6 +1319,7 @@ export const CRMService = {
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore update warning for conexao_participants confirmation:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1402,15 +1333,16 @@ export const CRMService = {
     const newPoints = Math.max(0, (current.points || 0) + additionalPoints);
     const now = new Date().toISOString();
 
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'conexao_participants', id);
+        const docRef = doc(db!, 'conexao_participants', id);
         await setDoc(docRef, cleanFirestoreData({
           points: newPoints,
           updatedAt: now,
         }), { merge: true });
       } catch (e) {
         console.warn('Firestore points warning for conexao_participants:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1427,12 +1359,13 @@ export const CRMService = {
     updates: Partial<ConexaoTeamGoal>,
     isDemo: boolean
   ): Promise<ConexaoTeamGoal> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'conexao_goals', color);
+        const docRef = doc(db!, 'conexao_goals', color);
         await setDoc(docRef, cleanFirestoreData({ color, ...updates, updatedAt: new Date().toISOString() }), { merge: true });
       } catch (e) {
         console.warn('Firestore goal warning for conexao_goals:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1464,13 +1397,14 @@ export const CRMService = {
     report: WeeklyConfirmationReport,
     isDemo: boolean
   ): Promise<WeeklyConfirmationReport> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const colRef = collection(db, 'weekly_confirmations');
+        const colRef = collection(db!, 'weekly_confirmations');
         const docRef = doc(colRef, report.id);
         await setDoc(docRef, cleanFirestoreData(report));
       } catch (e) {
         console.warn('Firestore weekly report warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 
@@ -1479,12 +1413,13 @@ export const CRMService = {
   },
 
   async deleteWeeklyReport(id: string, isDemo: boolean): Promise<void> {
-    if (!isDemo && db && auth?.currentUser) {
+    if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db, 'weekly_confirmations', id);
+        const docRef = doc(db!, 'weekly_confirmations', id);
         await deleteDoc(docRef);
       } catch (e) {
         console.warn('Firestore delete weekly report warning:', e);
+        throw new Error(firebaseErrorMessage(e));
       }
     }
 

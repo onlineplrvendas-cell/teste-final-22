@@ -21,20 +21,11 @@ service cloud.firestore {
     }
 
     function isSystemAdmin() {
-      return isSignedIn() && (
-        (hasUserDoc() && getUserDoc().role == 'admin' && getUserDoc().active == true) ||
-        request.auth.token.email == 'onlineplrvendas@gmail.com' ||
-        request.auth.token.email == 'mktflorestaverde@gmail.com' ||
-        request.auth.token.email == 'pastorbruno@casadedeus.org'
-      );
+      return hasUserDoc() && getUserDoc().role == 'admin' && getUserDoc().active == true;
     }
 
     function isStaffMember() {
-      return isSystemAdmin() || (
-        isSignedIn() && (
-          !hasUserDoc() || getUserDoc().active == true
-        )
-      );
+      return hasUserDoc() && getUserDoc().active == true;
     }
 
     function isConexaoGeneralLeader() {
@@ -57,11 +48,17 @@ service cloud.firestore {
       allow get: if isSignedIn() && (request.auth.uid == userId || isStaffMember());
       allow list: if isSignedIn() && isStaffMember();
 
-      // Administrators can create or user can create/update their own profile
-      allow create: if isSystemAdmin() || (isSignedIn() && request.auth.uid == userId);
+      // Provision profiles through an authenticated administrator only.
+      // The first administrator must be created using the Firebase Console.
+      allow create: if isSystemAdmin() && request.resource.data.uid == userId &&
+        !request.resource.data.keys().hasAny(['password']);
       allow update: if isSystemAdmin() || (
         isSignedIn() && request.auth.uid == userId &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'uid',
+          'email',
+          'username',
+          'password',
           'role',
           'assignedCongregations',
           'assignedTeam',

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { useCRM } from '../context/CRMContext';
+import { useAuth } from '../context/AuthContext';
 import { UserProfile, Congregation, UserRole, ConexaoColor } from '../types';
 import { CONEXAO_COLORS, CONEXAO_COLOR_CONFIGS } from '../utils/conexaoConfig';
 import { ConexaoLogo } from './ConexaoLogo';
@@ -31,6 +32,7 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   userToEdit,
 }) => {
   const { createUser, updateUser, deleteUser } = useCRM();
+  const { isDemoMode, currentUser } = useAuth();
 
   const isEditing = !!userToEdit;
 
@@ -49,7 +51,7 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const isMasterUser = userToEdit?.uid === 'master-pastorbruno' || userToEdit?.uid === 'admin-1';
+  const isMasterUser = !!userToEdit && (userToEdit.uid === currentUser?.uid || userToEdit.uid === 'master-pastorbruno' || userToEdit.uid === 'admin-1');
 
   useEffect(() => {
     setConfirmDelete(false);
@@ -57,7 +59,7 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
       setName(userToEdit.name);
       setUsername(userToEdit.username || userToEdit.email.split('@')[0] || '');
       setEmail(userToEdit.email);
-      setPassword(userToEdit.password || '123456');
+      setPassword(isDemoMode ? userToEdit.password || '' : '');
       if (userToEdit.assignedCongregations.length >= 3) {
         setCongregationScope('all');
       } else {
@@ -78,12 +80,15 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
     }
     setErrors({});
     setSuccessMessage(null);
-  }, [userToEdit, isOpen]);
+  }, [userToEdit, isOpen, isDemoMode]);
 
   const validate = (): boolean => {
     const err: Record<string, string> = {};
     if (!name.trim()) err.name = 'Nome completo é obrigatório';
-    if (!username.trim()) err.username = 'Login/Usuário é obrigatório';
+    if (!isEditing || isDemoMode) {
+      if (!username.trim()) err.username = 'Login/Usuário é obrigatório';
+      else if (!/^[a-zA-Z0-9._-]+$/.test(username.trim())) err.username = 'Use somente letras sem acento, números, ponto, traço ou sublinhado.';
+    }
     if (!isEditing && (!password || password.length < 6)) {
       err.password = 'A senha deve ter no mínimo 6 caracteres (exigência do Firebase Auth)';
     } else if (password && password.length < 6) {
@@ -110,14 +115,12 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           : [congregationScope as Congregation];
 
       const cleanUsername = username.trim().replace(/\s+/g, '').toLowerCase();
-      const userEmail = email.trim() || `${cleanUsername}@casadedeus.org`;
+      const userEmail = email.trim().toLowerCase() || `${cleanUsername}@casadedeus.org`;
 
       if (isEditing && userToEdit) {
         await updateUser(userToEdit.uid, {
           name: name.trim(),
-          username: cleanUsername,
-          email: userEmail,
-          password: password.trim() || userToEdit.password,
+          ...(isDemoMode ? { username: cleanUsername, email: userEmail, ...(password ? { password } : {}) } : {}),
           role,
           assignedTeam: role === 'lider_equipe' ? assignedTeam : undefined,
           assignedCongregations,
@@ -130,15 +133,15 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             name: name.trim(),
             username: cleanUsername,
             email: userEmail,
-            password: password.trim(),
+            ...(isDemoMode ? { password } : {}),
             role,
             assignedTeam: role === 'lider_equipe' ? assignedTeam : undefined,
             assignedCongregations,
             active,
           },
-          password.trim()
+          password
         );
-        setSuccessMessage('Novo acesso de equipe criado com sucesso!');
+        setSuccessMessage(`Acesso criado com sucesso! Entre com ${email.trim() ? userEmail : cleanUsername} e a senha cadastrada.`);
       }
 
       setTimeout(() => {
@@ -344,6 +347,7 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
               <input
                 type="text"
                 value={username}
+                disabled={isEditing && !isDemoMode}
                 onChange={e => setUsername(e.target.value)}
                 placeholder="matheus.azul"
                 className={`w-full px-3 py-2 bg-[#141414] border ${
@@ -355,12 +359,13 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-[#CCCCCC] mb-1">
-                Senha de Acesso {isEditing ? '(deixe em branco para manter)' : <span className="text-white font-bold">*</span>}
+                Senha de Acesso {isEditing ? (isDemoMode ? '(deixe em branco para manter)' : '(use a recuperação de senha)') : <span className="text-white font-bold">*</span>}
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
+                  disabled={isEditing && !isDemoMode}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className={`w-full px-3 pr-8 py-2 bg-[#141414] border ${
@@ -382,16 +387,23 @@ export const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           {/* E-mail opcional */}
           <div>
             <label className="block text-xs font-medium text-[#CCCCCC] mb-1">
-              E-mail Institucional (opcional)
+              E-mail de acesso (opcional)
             </label>
             <input
               type="email"
               value={email}
+              disabled={isEditing && !isDemoMode}
               onChange={e => setEmail(e.target.value)}
               placeholder="lider@casadedeus.org"
               className="w-full px-3 py-2 bg-[#141414] border border-[#262626] rounded-lg text-white text-xs focus:outline-none focus:border-white transition-colors"
             />
           </div>
+
+          <p className="text-[11px] text-zinc-400">
+            {isEditing && !isDemoMode
+              ? 'Para recuperar a senha de um e-mail real, use “Esqueceu a senha?” na entrada. Se o login não tem caixa de e-mail, peça a redefinição ao administrador. Alterações de e-mail exigem atualizar a conta no Firebase Authentication.'
+              : 'Se informar um e-mail, ele será usado para entrar. Se deixar em branco, entre com o login escolhido.'}
+          </p>
 
           {/* Destinação da Unidade da Igreja (se aplicável) */}
           {role !== 'lider_conexao' && role !== 'admin' && (

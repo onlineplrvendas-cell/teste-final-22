@@ -1,6 +1,7 @@
 import { initializeApp, getApps, FirebaseApp, deleteApp } from 'firebase/app';
-import { getAuth, Auth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, Auth, User, createUserWithEmailAndPassword, signOut, deleteUser, setPersistence, inMemoryPersistence } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDocFromServer } from 'firebase/firestore';
+import { firebaseErrorMessage } from '../utils/userProfile';
 
 export enum OperationType {
   CREATE = 'create',
@@ -104,34 +105,35 @@ async function testConnection() {
  * Creates a new user in Firebase Authentication without disturbing the currently logged-in Master session.
  * Uses an isolated secondary Firebase app instance.
  */
-export async function createFirebaseAuthUser(email: string, pass: string): Promise<string> {
+export async function createFirebaseAuthUser(email: string, pass: string, saveProfile: (uid: string) => Promise<void>): Promise<string> {
   if (!envConfig.apiKey || !envConfig.projectId) {
     throw new Error('Firebase Authentication não está configurado. Verifique as credenciais no .env.');
   }
 
   const tempAppName = `auth-worker-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const secondaryApp = initializeApp(envConfig, tempAppName);
+  let secondaryAuth: Auth | undefined;
+  let createdUser: User | undefined;
   try {
-    const secondaryAuth = getAuth(secondaryApp);
-    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email.trim(), pass.trim());
-    const uid = userCredential.user.uid;
-    await signOut(secondaryAuth);
-    return uid;
-  } catch (err: any) {
-    const code = err?.code || '';
-    if (code === 'auth/email-already-in-use') {
-      throw new Error('Este e-mail já está cadastrado no Firebase Authentication.');
+    secondaryAuth = getAuth(secondaryApp);
+    await setPersistence(secondaryAuth, inMemoryPersistence);
+    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email.trim().toLowerCase(), pass);
+    createdUser = userCredential.user;
+    await saveProfile(createdUser.uid);
+    return createdUser.uid;
+  } catch (err: unknown) {
+    // Roll back only the account created by this attempt if its profile could not be saved.
+    if (createdUser) {
+      try {
+        await deleteUser(createdUser);
+      } catch (rollbackError) {
+        console.error('Falha ao desfazer cadastro incompleto:', rollbackError);
+        throw new Error('O perfil não foi salvo e a conta ficou pendente no Firebase Authentication. Peça ao administrador para conferir o UID ' + createdUser.uid + ' antes de tentar novamente. ' + firebaseErrorMessage(err));
+      }
     }
-    if (code === 'auth/invalid-email') {
-      throw new Error('O formato do e-mail informado é inválido.');
-    }
-    if (code === 'auth/weak-password') {
-      throw new Error('A senha informada é fraca. O Firebase exige no mínimo 6 caracteres.');
-    }
-    throw new Error(err?.message || 'Falha ao registrar usuário no Firebase Authentication.');
+    throw new Error(firebaseErrorMessage(err));
   } finally {
-    try {
-      await deleteApp(secondaryApp);
-    } catch {}
+    try { if (secondaryAuth) await signOut(secondaryAuth); } catch (error) { console.warn('Falha ao encerrar sessão de cadastro:', error); }
+    try { await deleteApp(secondaryApp); } catch (error) { console.warn('Falha ao liberar sessão de cadastro:', error); }
   }
 }
