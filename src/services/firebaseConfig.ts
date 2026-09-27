@@ -63,13 +63,17 @@ export let db: Firestore | null = null;
 export let isFirebaseConfigured = false;
 
 // Attempt to load from environment or config
+// Hostinger builds this Vite app without automatically injecting local .env files.
+// Keep env vars as the first choice, but fall back to this Firebase Web App config so
+// the production build can initialize Firebase. These client-side Firebase values are
+// expected to be public; access control must remain enforced by Firebase Auth/Firestore rules.
 export const envConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCt_dhTpjQ2UJfDZOcaNsw8pcI67YJ15d4',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'crm-casa-3732b.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'crm-casa-3732b',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'crm-casa-3732b.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '875685647400',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:875685647400:web:a4546a412248579d53111d',
 };
 
 if (envConfig.apiKey && envConfig.projectId) {
