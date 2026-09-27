@@ -68,7 +68,7 @@ export let isFirebaseConfigured = false;
 // the production build can initialize Firebase. These client-side Firebase values are
 // expected to be public; access control must remain enforced by Firebase Auth/Firestore rules.
 export const envConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCt_dhTpjQ2UJfDZOcaNsw8pcI67YJ15d4',
+ apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCt_dhTpJQ2UJfDZOCaNsw8pcI67YJ15d4',,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'crm-casa-3732b.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'crm-casa-3732b',
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'crm-casa-3732b.firebasestorage.app',
