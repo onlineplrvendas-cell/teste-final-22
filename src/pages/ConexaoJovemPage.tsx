@@ -26,7 +26,7 @@ import { EnrollConexaoModal } from '../components/EnrollConexaoModal';
 import { ConexaoFunnelKanban } from '../components/ConexaoFunnelKanban';
 import { ConexaoFunnelChart } from '../components/ConexaoFunnelChart';
 import { ConexaoInteractionModal, FUNNEL_STAGES } from '../components/ConexaoInteractionModal';
-import { formatDateBR } from '../utils/date';
+import { formatDateBR, isContactConfirmedThisWeek } from '../utils/date';
 import { getWhatsAppUrl, normalizePhone } from '../utils/phone';
 import {
   Sparkles,
@@ -198,10 +198,10 @@ export const ConexaoJovemPage: React.FC<ConexaoJovemPageProps> = ({ onOpenContac
         role: c.conexaoJovem.role,
         congregation: c.congregation,
         baseName: c.conexaoJovem.baseName,
-        confirmedNextCulto: c.confirmedThisWeek || false,
+        confirmedNextCulto: isContactConfirmedThisWeek(c),
         contactId: c.id,
         churchContact: c,
-        funnelStage: c.conexaoJovem.role === 'convidado' ? (c.confirmedThisWeek ? 'em_acompanhamento' : 'novo_contato') : 'integrado',
+        funnelStage: c.conexaoJovem.role === 'convidado' ? (isContactConfirmedThisWeek(c) ? 'em_acompanhamento' : 'novo_contato') : 'integrado',
         responsibleName: c.conexaoJovem.baseName ? `Base ${c.conexaoJovem.baseName}` : 'Equipe Geral',
         lastInteraction: `${dateStr} - Novo contato`,
         nextAction: 'Acompanhar integração na equipe',

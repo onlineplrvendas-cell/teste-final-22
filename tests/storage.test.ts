@@ -13,7 +13,7 @@ vi.mock('firebase/firestore', () => ({
   where: (field: string, operator: string, value: unknown) => ({ field, operator, value }),
   updateDoc: vi.fn(), writeBatch: () => batch,
 }));
-import { CRMService, realManager } from '../src/services/storage';
+import { cleanFirestoreData, CRMService, PersistentDataManager, realManager } from '../src/services/storage';
 
 const admin: UserProfile = { uid: 'admin', name: 'Admin', email: 'admin@example.com', role: 'admin', assignedCongregations: ['Recreio', 'Curicica', 'Guaratiba'], active: true };
 const contact = { id: 'saved', name: 'Pessoa', phone: '21999999999', congregation: 'Recreio', category: 'Visitante', stage: 'Aguardando primeiro contato', source: 'Culto', normalizedPhone: '5521999999999', isArchived: false, createdBy: 'admin', createdAt: '2026-09-27', updatedAt: '2026-09-27' } as const;
@@ -31,6 +31,25 @@ beforeEach(() => {
 });
 
 describe('cadastros persistentes', () => {
+  it('mantém null para apagar campos e remove somente undefined', () => {
+    expect(cleanFirestoreData({ confirmedNotes: null, untouched: undefined })).toEqual({ confirmedNotes: null });
+  });
+
+  it('transfere tarefas e interações junto com a congregação do contato', () => {
+    const manager = new PersistentDataManager('transfer-test', () => ({
+      contacts: [contact as any],
+      interactions: [{ id: 'interaction-1', contactId: contact.id, congregation: 'Recreio' } as any],
+      tasks: [{ id: 'task-1', contactId: contact.id, congregation: 'Recreio' } as any],
+      users: [],
+      conexaoParticipants: [],
+    }));
+
+    manager.updateContact(contact.id, { congregation: 'Curicica' });
+
+    expect(manager.getTasks()[0].congregation).toBe('Curicica');
+    expect(manager.getInteractions()[0].congregation).toBe('Curicica');
+  });
+
   it('aguarda confirmação do banco antes de mostrar o contato', async () => {
     let acknowledge!: () => void;
     firestore.setDoc.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve; }));
@@ -43,6 +62,47 @@ describe('cadastros persistentes', () => {
     firestore.setDoc.mockRejectedValue(denied);
     await expect(CRMService.createContact(contact, false)).rejects.toThrow('Firebase recusou');
     expect(realManager.getContacts()).toEqual([]);
+  });
+  it('transfere tarefas e interações reais no mesmo lote do contato', async () => {
+    realManager.addContact(contact as any);
+    realManager.addTask({ id: 'task-local', contactId: contact.id, congregation: 'Recreio' } as any);
+    realManager.addInteraction({ id: 'interaction-local', contactId: contact.id, congregation: 'Recreio' } as any);
+    firestore.getDocsFromServer.mockImplementation(async ({ collection }) => ({
+      docs: [{ id: collection.name === 'tasks' ? 'task-remote' : 'interaction-remote' }],
+    }));
+
+    await CRMService.updateContact(contact.id, { congregation: 'Curicica' }, false);
+
+    expect(batch.set.mock.calls.map(([ref]) => ref.name)).toEqual(['contacts', 'tasks', 'interactions']);
+    expect(realManager.getTasks()[0].congregation).toBe('Curicica');
+    expect(realManager.getInteractions()[0].congregation).toBe('Curicica');
+    expect(batch.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('exclui registros dependentes no mesmo lote da exclusão definitiva', async () => {
+    realManager.addContact(contact as any);
+    firestore.getDocsFromServer.mockImplementation(async ({ collection }) => ({
+      docs: collection.name === 'contacts' ? [] : [{ id: `${collection.name}-1` }],
+    }));
+
+    await CRMService.deleteContactPermanent(contact.id, false);
+
+    expect(batch.delete.mock.calls.map(([ref]) => ref.name)).toEqual([
+      'tasks', 'interactions', 'conexao_participants', 'contacts',
+    ]);
+    expect(realManager.getContacts()).toEqual([]);
+    expect(batch.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('persiste atualizações de resultados mensais no Firestore', async () => {
+    await CRMService.updateConexaoMonthlyResult('azul', 0, { guests: 4 }, false);
+
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      { name: 'conexao_monthly_results', id: 'azul' },
+      expect.objectContaining({ color: 'azul', results: expect.arrayContaining([expect.objectContaining({ guests: 4 })]) }),
+      { merge: true },
+    );
+    expect(realManager.getConexaoMonthlyResults().azul[0].guests).toBe(4);
   });
   it('não cria acesso local quando o perfil é recusado', async () => {
     firestore.setDoc.mockRejectedValue(denied);
@@ -99,7 +159,7 @@ describe('sincronização sem zerar o painel', () => {
   it('carrega o Conexão sem exigir acesso às coleções de outras áreas', async () => {
     const leader = { ...admin, role: 'lider_equipe', assignedTeam: 'azul' } as UserProfile;
     await CRMService.loadRealDataFromFirestore(leader);
-    expect(firestore.getDocsFromServer.mock.calls.map(([q]) => q.collection.name)).toEqual(['conexao_participants', 'conexao_goals']);
+    expect(firestore.getDocsFromServer.mock.calls.map(([q]) => q.collection.name)).toEqual(['conexao_participants', 'conexao_goals', 'conexao_monthly_results']);
     expect(firestore.getDocsFromServer.mock.calls[0][0].constraints).toEqual([{ field: 'color', operator: '==', value: 'azul' }]);
   });
   it('ignora resposta recebida depois de sair da conta', async () => {
@@ -141,6 +201,16 @@ describe('matrículas persistentes', () => {
     expect(batch.commit).toHaveBeenCalledTimes(1);
     expect(realManager.getConexaoParticipants()[0].id).toBe(batch.set.mock.calls[1][0].id);
     expect(realManager.getContacts()[0].conexaoJovem?.color).toBe('azul');
+  });
+  it('reutiliza participante existente por telefone normalizado', async () => {
+    realManager.addContact(contact as any);
+    realManager.addConexaoParticipant({ ...participant, phone: '(21) 99999-9999' } as any);
+    const existingParticipantId = realManager.getConexaoParticipants()[0].id;
+
+    await CRMService.enrollInConexao(contact.id, { color: 'azul', role: 'membro' }, false);
+
+    expect(realManager.getConexaoParticipants()).toHaveLength(1);
+    expect(batch.set.mock.calls[1][0].id).toBe(existingParticipantId);
   });
   it('não cria participante fantasma se o lote do Conexão falhar', async () => {
     realManager.addContact(contact); batch.commit.mockRejectedValue(denied);

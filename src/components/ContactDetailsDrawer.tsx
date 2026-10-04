@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
 import { Contact, Interaction, Task } from '../types';
-import { formatDateBR, formatDateTimeBR, getTaskDueState } from '../utils/date';
+import { formatDateBR, formatDateTimeBR, getTaskDueState, isContactConfirmedThisWeek } from '../utils/date';
 import { getWhatsAppUrl } from '../utils/phone';
 import {
   X,
@@ -239,7 +239,7 @@ export const ContactDetailsDrawer: React.FC<ContactDetailsDrawerProps> = ({
                 <span>Culto deste Fim de Semana</span>
               </span>
               <p className="text-[11px] text-[#888888]">
-                {contact.confirmedThisWeek
+                {isContactConfirmedThisWeek(contact)
                   ? 'Presença confirmada para o culto com a equipe'
                   : 'Ainda não confirmou presença para o próximo culto'}
               </p>
@@ -248,12 +248,12 @@ export const ContactDetailsDrawer: React.FC<ContactDetailsDrawerProps> = ({
             <button
               onClick={() => toggleWeeklyConfirmation(contact.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 ${
-                contact.confirmedThisWeek
+                isContactConfirmedThisWeek(contact)
                   ? 'bg-white text-black shadow-sm'
                   : 'bg-[#141414] hover:bg-[#1A1A1A] text-white border border-[#2B2B2B]'
               }`}
             >
-              {contact.confirmedThisWeek ? 'Confirmado ✓' : 'Confirmar Presença'}
+              {isContactConfirmedThisWeek(contact) ? 'Confirmado ✓' : 'Confirmar Presença'}
             </button>
           </div>
 

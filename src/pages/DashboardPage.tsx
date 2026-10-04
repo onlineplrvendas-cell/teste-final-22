@@ -1,6 +1,6 @@
 import React from 'react';
 import { useCRM } from '../context/CRMContext';
-import { formatDateBR, getTaskDueState } from '../utils/date';
+import { formatDateBR, getTaskDueState, isContactConfirmedThisWeek } from '../utils/date';
 import { Contact, Task } from '../types';
 import {
   Users,
@@ -58,7 +58,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     conexaoParticipants,
   } = useCRM();
 
-  const confirmedCount = contacts.filter(c => c.confirmedThisWeek && !c.isArchived).length;
+  const confirmedCount = contacts.filter(c => isContactConfirmedThisWeek(c) && !c.isArchived).length;
 
   const getCongregationTitle = () => {
     if (selectedCongregation === 'all') return 'Todas as Congregações (Visão Consolidada)';

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
+import { isContactConfirmedThisWeek } from '../utils/date';
 import { MainTab } from '../types';
 
 import { getUserPermissions } from '../utils/permissions';
@@ -39,7 +40,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
   const { metrics, uniReinoStudents, conexaoParticipants, contacts } = useCRM();
   const { currentUser, isDemoMode, logout, toggleDemoMode } = useAuth();
   const perms = getUserPermissions(currentUser);
-  const confirmedCount = contacts.filter(c => c.confirmedThisWeek && !c.isArchived).length;
+  const confirmedCount = contacts.filter(c => isContactConfirmedThisWeek(c) && !c.isArchived).length;
 
   if (!isOpen) return null;
 

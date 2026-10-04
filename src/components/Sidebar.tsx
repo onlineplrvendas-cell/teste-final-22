@@ -14,6 +14,7 @@ import {
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
 import { MainTab } from '../types';
+import { isContactConfirmedThisWeek } from '../utils/date';
 import { ConexaoLogo } from './ConexaoLogo';
 import { CONEXAO_COLOR_CONFIGS } from '../utils/conexaoConfig';
 
@@ -30,7 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const { isDemoMode, currentUser, toggleDemoMode } = useAuth();
   const perms = getUserPermissions(currentUser);
 
-  const confirmedCount = contacts.filter(c => c.confirmedThisWeek && !c.isArchived).length;
+  const confirmedCount = contacts.filter(c => isContactConfirmedThisWeek(c) && !c.isArchived).length;
 
   type NavItem = {
     id: MainTab;

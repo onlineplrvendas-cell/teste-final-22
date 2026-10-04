@@ -60,7 +60,7 @@ export const SetupInstructionsModal: React.FC<SetupInstructionsModalProps> = ({
             <ol className="list-decimal pl-5 space-y-1">
               <li>Crie o usuário administrador na aba <strong>Users</strong> do Firebase Auth (ex: <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">onlineplrvendas@gmail.com</code>).</li>
               <li>No <strong>Cloud Firestore</strong>, acesse a coleção <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">users</code> e adicione o documento com o ID correspondente ao <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">uid</code> gerado no Auth.</li>
-              <li>Defina os campos: <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">role: &quot;admin&quot;</code>, <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">active: true</code>, <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">assignedCongregations: &quot;Recreio,Curicica,Guaratiba&quot;</code>.</li>
+              <li>Defina os campos: <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">role: &quot;admin&quot;</code>, <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">active: true</code>, <code className="text-white bg-[#1F1F1F] px-1 py-0.5 rounded">assignedCongregations: [&quot;Recreio&quot;, &quot;Curicica&quot;, &quot;Guaratiba&quot;]</code>.</li>
             </ol>
           </div>
         </div>

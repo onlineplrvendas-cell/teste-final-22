@@ -23,7 +23,11 @@ export const cleanPhone = getOnlyDigits;
  * Masks a phone number to (XX) XXXXX-XXXX or (XX) XXXX-XXXX
  */
 export function maskPhoneBR(value: string): string {
-  const digits = getOnlyDigits(value).slice(0, 11);
+  let digits = getOnlyDigits(value);
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  digits = digits.slice(0, 11);
 
   if (!digits) return '';
   if (digits.length <= 2) {

@@ -34,11 +34,30 @@ service cloud.firestore {
       );
     }
 
-    function canAccessCongregation(congregationName) {
-      return isSystemAdmin() || (
-        isStaffMember() &&
-        (congregationName in getUserDoc().assignedCongregations ||
-         getUserDoc().assignedCongregations.matches('.*' + congregationName + '.*'))
+    function inMyCongregations(congregationName) {
+      return isSystemAdmin() || (isStaffMember() && congregationName in getUserDoc().assignedCongregations);
+    }
+
+    function canAccessContact(data) {
+      return inMyCongregations(data.congregation) &&
+        (getUserDoc().role != 'lider_familia' ||
+          (data.congregation == 'Curicica' && data.curicicaFamily == getUserDoc().assignedCuricicaFamily));
+    }
+
+    function canAccessWeeklyReport(data) {
+      return inMyCongregations(data.congregation) &&
+        (getUserDoc().role != 'lider_familia' || data.curicicaFamily == getUserDoc().assignedCuricicaFamily);
+    }
+
+    function canAccessFamilyScopedData(data) {
+      return getUserDoc().role != 'lider_familia' ||
+        (data.congregation == 'Curicica' && data.curicicaFamily == getUserDoc().assignedCuricicaFamily);
+    }
+
+    function canAccessConexaoParticipant(data) {
+      return isSignedIn() && isStaffMember() && (
+        isSystemAdmin() || isConexaoGeneralLeader() ||
+        getUserDoc().role != 'lider_equipe' || data.color == getUserDoc().assignedTeam
       );
     }
 
@@ -71,29 +90,20 @@ service cloud.firestore {
 
     // Contacts Collection
     match /contacts/{contactId} {
-      allow get: if isSignedIn() && isStaffMember();
-      allow list: if isSignedIn() && isStaffMember();
+      allow get, list: if canAccessContact(resource.data);
 
-      allow create: if isSignedIn() && isStaffMember() &&
+      allow create: if canAccessContact(request.resource.data) &&
         request.resource.data.name is string && request.resource.data.name.size() > 0 &&
         request.resource.data.phone is string && request.resource.data.phone.size() > 0;
 
-      allow update: if isSignedIn() && isStaffMember();
+      allow update: if canAccessContact(resource.data) && canAccessContact(request.resource.data);
 
       allow delete: if isSystemAdmin();
     }
 
     // Conexão Jovem Participants Collection
     match /conexao_participants/{participantId} {
-      // General leaders and admins can read all; team leaders can read their assigned team
-      allow get: if isSignedIn() && isStaffMember() && (
-        isSystemAdmin() ||
-        isConexaoGeneralLeader() ||
-        getUserDoc().role != 'lider_equipe' ||
-        resource.data.color == getUserDoc().assignedTeam
-      );
-
-      allow list: if isSignedIn() && isStaffMember();
+      allow get, list: if canAccessConexaoParticipant(resource.data);
 
       allow create: if isSignedIn() && isStaffMember() && (
         isSystemAdmin() ||
@@ -120,23 +130,35 @@ service cloud.firestore {
 
     // Interactions Collection
     match /interactions/{interactionId} {
-      allow get, list: if isSignedIn() && isStaffMember();
-      allow create, update: if isSignedIn() && isStaffMember();
+      allow get, list: if inMyCongregations(resource.data.congregation) && canAccessFamilyScopedData(resource.data);
+      allow create: if inMyCongregations(request.resource.data.congregation) && canAccessFamilyScopedData(request.resource.data);
+      allow update: if inMyCongregations(resource.data.congregation) && inMyCongregations(request.resource.data.congregation) &&
+        canAccessFamilyScopedData(resource.data) && canAccessFamilyScopedData(request.resource.data);
       allow delete: if isSystemAdmin();
     }
 
     // Tasks Collection
     match /tasks/{taskId} {
-      allow get, list: if isSignedIn() && isStaffMember();
-      allow create, update: if isSignedIn() && isStaffMember();
+      allow get, list: if inMyCongregations(resource.data.congregation) && canAccessFamilyScopedData(resource.data);
+      allow create: if inMyCongregations(request.resource.data.congregation) && canAccessFamilyScopedData(request.resource.data);
+      allow update: if inMyCongregations(resource.data.congregation) && inMyCongregations(request.resource.data.congregation) &&
+        canAccessFamilyScopedData(resource.data) && canAccessFamilyScopedData(request.resource.data);
       allow delete: if isSystemAdmin();
     }
 
     // Weekly Confirmations Collection
     match /weekly_confirmations/{reportId} {
-      allow get, list: if isSignedIn() && isStaffMember();
-      allow create, update: if isSignedIn() && isStaffMember();
+      allow get, list: if canAccessWeeklyReport(resource.data);
+      allow create: if canAccessWeeklyReport(request.resource.data);
+      allow update: if canAccessWeeklyReport(resource.data) && canAccessWeeklyReport(request.resource.data);
       allow delete: if isSystemAdmin();
+    }
+
+    // Conexão monthly results
+    match /conexao_monthly_results/{resultId} {
+      allow get, list: if isSignedIn() && isStaffMember();
+      allow create, update: if isSystemAdmin() || isConexaoGeneralLeader();
+      allow delete: if isSystemAdmin() || isConexaoGeneralLeader();
     }
   }
 }

@@ -23,7 +23,7 @@ import {
 } from '../types';
 import { useAuth } from './AuthContext';
 import { CRMService, demoManager, realManager } from '../services/storage';
-import { isCurrentMonthInSP, getTaskDueState, getLast6Months } from '../utils/date';
+import { getDateStringInSaoPaulo, isContactConfirmedThisWeek, isCurrentMonthInSP, getTaskDueState, getLast6Months } from '../utils/date';
 import { getOnlyDigits, normalizePhone } from '../utils/phone';
 import { generateEmptyConexaoMonthlyResults } from '../data/mockData';
 
@@ -217,11 +217,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const participants = activeManager.getConexaoParticipants();
       setRawConexaoParticipants(participants);
       setRawConexaoGoals(activeManager.getConexaoGoals());
-      if (!isDemoMode && (!participants || participants.length === 0)) {
-        setRawConexaoMonthlyResults(generateEmptyConexaoMonthlyResults());
-      } else {
-        setRawConexaoMonthlyResults(activeManager.getConexaoMonthlyResults());
-      }
+      setRawConexaoMonthlyResults(activeManager.getConexaoMonthlyResults());
       setRawWeeklyReports(activeManager.getWeeklyReports());
 
       // If a contact was open in the drawer, verify it exists in current dataset
@@ -377,7 +373,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       all: active.length,
       membros: active.filter(c => c.category === 'Membro').length,
       convidados: active.filter(c => c.category === 'Visitante' || c.category === 'Novo contato').length,
-      confirmados: active.filter(c => c.confirmedThisWeek).length,
+      confirmados: active.filter(c => isContactConfirmedThisWeek(c)).length,
       excluir: archived.length,
     };
   }, [congregationFilteredContacts]);
@@ -431,11 +427,11 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Date range filter (createdAt)
       if (filterState.startDate) {
-        const cDate = contact.createdAt.slice(0, 10);
+        const cDate = getDateStringInSaoPaulo(contact.createdAt);
         if (cDate < filterState.startDate) return false;
       }
       if (filterState.endDate) {
-        const cDate = contact.createdAt.slice(0, 10);
+        const cDate = getDateStringInSaoPaulo(contact.createdAt);
         if (cDate > filterState.endDate) return false;
       }
 
@@ -446,7 +442,7 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (activeViewTab === 'convidados' && contact.category !== 'Visitante' && contact.category !== 'Novo contato') {
         return false;
       }
-      if (activeViewTab === 'confirmados' && !contact.confirmedThisWeek) {
+      if (activeViewTab === 'confirmados' && !isContactConfirmedThisWeek(contact)) {
         return false;
       }
 

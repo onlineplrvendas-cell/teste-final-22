@@ -191,7 +191,8 @@ export interface Contact {
   memberSinceDate?: string;
   initialNotes?: string;
   confirmedThisWeek?: boolean;
-  confirmedNotes?: string;
+  confirmedWeekKey?: string;
+  confirmedNotes?: string | null;
   isArchived: boolean;
   archivedAt?: string;
   createdBy: string;
@@ -206,6 +207,7 @@ export interface Interaction {
   id: string;
   contactId: string;
   congregation: Congregation;
+  curicicaFamily?: CuricicaFamily;
   channel: InteractionChannel;
   notes: string;
   userId: string;
@@ -220,6 +222,7 @@ export interface Task {
   contactId: string;
   contactName: string;
   congregation: Congregation;
+  curicicaFamily?: CuricicaFamily;
   description: string;
   assignedToId?: string;
   assignedToName?: string;
@@ -272,6 +275,7 @@ export interface WeeklyConfirmationEntry {
   status: WeeklyConfirmationStatus; // 'confirmed' (Verde) | 'unconfirmed' (Vermelho)
   absenceReason?: string; // Motivo obrigatório/destacado se 'unconfirmed'
   notes?: string;
+  pendingSave?: boolean;
   updatedAt: string;
 }
 
@@ -295,6 +299,7 @@ export interface WeeklyConfirmationReport {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   congregation: CongregationFilter;
+  curicicaFamily?: CuricicaFamily;
   entries: WeeklyConfirmationEntry[];
   summary: WeeklyConfirmationSummary;
   savedAt: string;

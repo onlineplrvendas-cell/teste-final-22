@@ -3,6 +3,8 @@ import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
 import { Contact, CuricicaFamily, CURICICA_FAMILIES } from '../types';
 import { getUserPermissions } from '../utils/permissions';
+import { getWeekRangeForDate, isContactConfirmedThisWeek } from '../utils/date';
+import { normalizePhone } from '../utils/phone';
 import {
   Users,
   Home,
@@ -91,7 +93,7 @@ export const CuricicaFamiliesPage: React.FC<CuricicaFamiliesPageProps> = ({
       const famContacts = curicicaContacts.filter(c => c.curicicaFamily === fam);
       const members = famContacts.filter(c => c.category === 'Membro');
       const visitors = famContacts.filter(c => c.category === 'Visitante' || c.category === 'Novo contato');
-      const confirmed = famContacts.filter(c => c.confirmedThisWeek);
+      const confirmed = famContacts.filter(c => isContactConfirmedThisWeek(c));
       const rate = famContacts.length > 0 ? Math.round((confirmed.length / famContacts.length) * 100) : 0;
       return {
         total: famContacts.length,
@@ -128,8 +130,8 @@ export const CuricicaFamiliesPage: React.FC<CuricicaFamiliesPageProps> = ({
         return false;
       }
 
-      if (presenceFilter === 'confirmed' && !c.confirmedThisWeek) return false;
-      if (presenceFilter === 'pending' && c.confirmedThisWeek) return false;
+      if (presenceFilter === 'confirmed' && !isContactConfirmedThisWeek(c)) return false;
+      if (presenceFilter === 'pending' && isContactConfirmedThisWeek(c)) return false;
 
       return true;
     });
@@ -137,10 +139,11 @@ export const CuricicaFamiliesPage: React.FC<CuricicaFamiliesPageProps> = ({
 
   // Fast toggle confirmation
   const handleToggleConfirmation = async (contact: Contact) => {
-    const nextStatus = !contact.confirmedThisWeek;
+    const nextStatus = !isContactConfirmedThisWeek(contact);
     await updateContact(contact.id, {
       confirmedThisWeek: nextStatus,
-      confirmedNotes: nextStatus ? undefined : 'Sem confirmação',
+      confirmedWeekKey: getWeekRangeForDate().weekKey,
+      confirmedNotes: nextStatus ? 'Confirmado para o culto da semana' : null,
     });
     setFeedbackNotice(
       nextStatus
@@ -152,8 +155,7 @@ export const CuricicaFamiliesPage: React.FC<CuricicaFamiliesPageProps> = ({
 
   // Open WhatsApp direct
   const handleOpenWhatsApp = (phone: string, name: string) => {
-    const digits = phone.replace(/\D/g, '');
-    const cleanNumber = digits.startsWith('55') ? digits : `55${digits}`;
+    const cleanNumber = normalizePhone(phone);
     const text = encodeURIComponent(
       `Graça e Paz, ${name}! Tudo bem? Passando para confirmar sua presença no nosso culto deste fim de semana na Casa de Deus Curicica!`
     );
@@ -173,8 +175,8 @@ export const CuricicaFamiliesPage: React.FC<CuricicaFamiliesPageProps> = ({
       phone: c.phone,
       congregation: c.congregation,
       responsibleName: c.assignedToName || famObj?.leaderName || 'Líder de Família',
-      status: (c.confirmedThisWeek ? 'confirmed' : 'unconfirmed') as 'confirmed' | 'unconfirmed',
-      absenceReason: c.confirmedThisWeek ? undefined : (c.confirmedNotes || 'Não informado'),
+      status: (isContactConfirmedThisWeek(c) ? 'confirmed' : 'unconfirmed') as 'confirmed' | 'unconfirmed',
+      absenceReason: isContactConfirmedThisWeek(c) ? undefined : (c.confirmedNotes || 'Não informado'),
       weekStart: new Date().toISOString().slice(0, 10),
       weekEnd: new Date().toISOString().slice(0, 10),
       notes: `Família: ${famName}`,
@@ -484,7 +486,7 @@ export const CuricicaFamiliesPage: React.FC<CuricicaFamiliesPageProps> = ({
                     </tr>
                   ) : (
                     currentFamilyContacts.map(contact => {
-                      const isConfirmed = contact.confirmedThisWeek;
+                      const isConfirmed = isContactConfirmedThisWeek(contact);
                       return (
                         <tr key={contact.id} className="hover:bg-[#111111] transition-colors group">
                           {/* Nome */}

@@ -787,8 +787,11 @@ export function generateInitialDemoData(): {
     },
   ];
 
+  const confirmedContactIds = new Set(['c-rec-2', 'c-rec-3', 'c-rec-4', 'c-cur-2', 'c-cur-7', 'c-gua-2', 'c-gua-7']);
+  const currentWeekKey = getWeekRangeForDate().weekKey;
   const contacts: Contact[] = rawContacts.map(c => {
     const createdAt = getOffsetDate(-c.daysAgoCreated, 0, 14, 20);
+    const confirmedThisWeek = confirmedContactIds.has(c.id);
     return {
       id: c.id,
       name: c.name,
@@ -805,8 +808,9 @@ export function generateInitialDemoData(): {
       firstVisitDate: c.firstVisitDate,
       memberSinceDate: c.memberSinceDate,
       initialNotes: c.initialNotes,
-      confirmedThisWeek: ['c-rec-2', 'c-rec-3', 'c-rec-4', 'c-cur-2', 'c-cur-7', 'c-gua-2', 'c-gua-7'].includes(c.id),
-      confirmedNotes: ['c-rec-2', 'c-rec-3', 'c-rec-4', 'c-cur-2', 'c-cur-7', 'c-gua-2', 'c-gua-7'].includes(c.id)
+      confirmedThisWeek,
+      confirmedWeekKey: confirmedThisWeek ? currentWeekKey : undefined,
+      confirmedNotes: confirmedThisWeek
         ? 'Confirmou presença para o culto deste domingo com a equipe'
         : undefined,
       isArchived: false,

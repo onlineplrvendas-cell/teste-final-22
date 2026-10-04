@@ -41,7 +41,8 @@ import {
   getAvailableWeekOptions,
   formatDateBR,
 } from '../utils/date';
-import { maskPhoneBR, getOnlyDigits } from '../utils/phone';
+import { maskPhoneBR, normalizePhone } from '../utils/phone';
+import { isContactConfirmedThisWeek } from '../utils/date';
 import { exportWeeklyConfirmationsToCSV } from '../utils/export';
 import { calculateWeeklySummary } from '../data/mockData';
 import { UniReinoBadge } from '../components/UniReinoBadge';
@@ -95,6 +96,7 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Search & Filters within table
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -117,14 +119,13 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
 
   // Helper to generate default entries for a week from existing contacts
   const buildDefaultEntriesFromContacts = useCallback(
-    (congFilter: CongregationFilter): WeeklyConfirmationEntry[] => {
+    (congFilter: CongregationFilter, weekKey: string): WeeklyConfirmationEntry[] => {
       let filtered = contacts.filter(c => !c.isArchived);
       if (congFilter !== 'all') {
         filtered = filtered.filter(c => c.congregation === congFilter);
       }
 
-      // Strictly include contacts marked confirmedThisWeek. Do not inject arbitrary unconfirmed members.
-      const finalContacts = filtered.filter(c => c.confirmedThisWeek);
+      const finalContacts = filtered.filter(c => isContactConfirmedThisWeek(c, weekKey));
 
       return finalContacts.map(c => ({
         contactId: c.id,
@@ -136,14 +137,17 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
         responsibleName: c.assignedToName || 'Não atribuído',
         status: 'confirmed',
         absenceReason: undefined,
+        pendingSave: weekKey === currentWeekRange.weekKey,
         updatedAt: new Date().toISOString(),
       }));
     },
-    [contacts]
+    [contacts, currentWeekRange.weekKey]
   );
 
   // Load entries when week or congregation changes
   useEffect(() => {
+    if (hasUnsavedChanges) return;
+
     // 1. Check if we already have a saved report for this weekKey and congregation
     const existingReport = weeklyReports.find(
       r => r.weekKey === selectedWeekKey && (r.congregation === selectedCongregation || (selectedCongregation === 'all' && r.congregation === 'all'))
@@ -162,15 +166,22 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
         const familyContactIds = new Set(contacts.map(c => c.id));
         weekEntries = weekEntries.filter(e => familyContactIds.has(e.contactId));
       }
-      setEntries(weekEntries);
-      setHasUnsavedChanges(false);
+      const savedIds = new Set(weekEntries.map(entry => entry.contactId));
+      const newlyConfirmed = activeWeekRange.isCurrentWeek
+        ? buildDefaultEntriesFromContacts(selectedCongregation, selectedWeekKey)
+            .filter(entry => !savedIds.has(entry.contactId))
+        : [];
+      const mergedEntries = [...weekEntries, ...newlyConfirmed];
+      setEntries(mergedEntries);
+      setHasUnsavedChanges(newlyConfirmed.length > 0);
     } else {
-      // 2. Fallback: generate default entries from contacts
-      const defaultEntries = buildDefaultEntriesFromContacts(selectedCongregation);
+      const defaultEntries = activeWeekRange.isCurrentWeek
+        ? buildDefaultEntriesFromContacts(selectedCongregation, selectedWeekKey)
+        : [];
       setEntries(defaultEntries);
-      setHasUnsavedChanges(false);
+      setHasUnsavedChanges(defaultEntries.length > 0);
     }
-  }, [selectedWeekKey, selectedCongregation, weeklyReports, buildDefaultEntriesFromContacts]);
+  }, [selectedWeekKey, selectedCongregation, weeklyReports, buildDefaultEntriesFromContacts, authorizedCongregations, currentUser, contacts, hasUnsavedChanges, activeWeekRange.isCurrentWeek]);
 
   // Compute live summary metrics
   const summary = useMemo(() => {
@@ -194,14 +205,7 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
       })
     );
     setHasUnsavedChanges(true);
-
-    // Also sync with contact's confirmedThisWeek attribute if current week
-    if (activeWeekRange.isCurrentWeek) {
-      updateContact(contactId, {
-        confirmedThisWeek: newStatus === 'confirmed',
-        confirmedNotes: newStatus === 'confirmed' ? 'Confirmado para o culto da semana' : undefined,
-      }).catch(err => console.error(err));
-    }
+    setSaveError(null);
   };
 
   // Handle reason change
@@ -241,27 +245,18 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
   };
 
   // Remove contact from week's list
-  const handleRemoveEntry = async (contactId: string) => {
+  const handleRemoveEntry = (contactId: string) => {
     setEntries(prev => prev.filter(e => e.contactId !== contactId));
     setHasUnsavedChanges(true);
-
-    // If current week, immediately sync contact status so it clears from the confirmed list across all views
-    if (activeWeekRange.isCurrentWeek) {
-      try {
-        await updateContact(contactId, {
-          confirmedThisWeek: false,
-          confirmedNotes: undefined,
-        });
-      } catch (err) {
-        console.error('Erro ao atualizar status do contato ao remover:', err);
-      }
-    }
+    setSaveError(null);
   };
 
   // Save current week's confirmation report
   const handleSaveWeek = async () => {
     setIsSaving(true);
+    setSaveError(null);
     try {
+      const savedEntries = entries.map(({ pendingSave: _pendingSave, ...entry }) => entry);
       const reportId = `report-${activeWeekRange.weekKey}-${selectedCongregation}`;
       const report: WeeklyConfirmationReport = {
         id: reportId,
@@ -270,7 +265,8 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
         startDate: activeWeekRange.startDate,
         endDate: activeWeekRange.endDate,
         congregation: selectedCongregation,
-        entries: entries,
+        curicicaFamily: currentUser?.role === 'lider_familia' ? currentUser.assignedCuricicaFamily : undefined,
+        entries: savedEntries,
         summary: summary,
         savedAt: new Date().toISOString(),
         savedBy: currentUser?.name || 'Equipe Pastoral',
@@ -280,9 +276,7 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
 
       // If current week, strictly synchronize confirmedThisWeek state on all scoped contacts
       if (activeWeekRange.isCurrentWeek) {
-        const confirmedEntryIds = new Set(
-          entries.filter(e => e.status === 'confirmed').map(e => e.contactId)
-        );
+        const confirmedEntryIds = new Set(savedEntries.filter(e => e.status === 'confirmed').map(e => e.contactId));
         const scopedContactsToSync = contacts.filter(c => {
           if (c.isArchived) return false;
           if (selectedCongregation !== 'all' && c.congregation !== selectedCongregation) return false;
@@ -290,19 +284,29 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
         });
 
         // Update any contact whose status differs from the saved entries
-        await Promise.all(
-          scopedContactsToSync.map(async c => {
-            const shouldBeConfirmed = confirmedEntryIds.has(c.id);
-            if (c.confirmedThisWeek !== shouldBeConfirmed) {
-              await updateContact(c.id, {
-                confirmedThisWeek: shouldBeConfirmed,
-                confirmedNotes: shouldBeConfirmed ? 'Confirmado para o culto da semana' : undefined,
-              });
-            }
-          })
-        );
+        const toSync = scopedContactsToSync.filter(c => {
+          const shouldBeConfirmed = confirmedEntryIds.has(c.id);
+          return !!c.confirmedThisWeek !== shouldBeConfirmed ||
+            (shouldBeConfirmed && c.confirmedWeekKey !== activeWeekRange.weekKey) ||
+            (!shouldBeConfirmed && c.confirmedNotes != null);
+        });
+        const results = await Promise.allSettled(toSync.map(c => {
+          const shouldBeConfirmed = confirmedEntryIds.has(c.id);
+          return updateContact(c.id, {
+            confirmedThisWeek: shouldBeConfirmed,
+            confirmedWeekKey: activeWeekRange.weekKey,
+            confirmedNotes: shouldBeConfirmed ? 'Confirmado para o culto da semana' : null,
+          });
+        }));
+        const failed = results.filter(result => result.status === 'rejected').length;
+        if (failed > 0) {
+          setHasUnsavedChanges(true);
+          setSaveError(`${failed} contato(s) não foram atualizados. Tente salvar novamente.`);
+          return;
+        }
       }
 
+      setEntries(savedEntries);
       setHasUnsavedChanges(false);
       setSaveSuccessMessage('Relatório da semana gravado com sucesso no histórico!');
       setTimeout(() => {
@@ -310,6 +314,8 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
       }, 3500);
     } catch (error) {
       console.error('Erro ao salvar relatório semanal:', error);
+      setHasUnsavedChanges(true);
+      setSaveError(error instanceof Error ? error.message : 'Não foi possível salvar o relatório. Tente novamente.');
     } finally {
       setIsSaving(false);
     }
@@ -434,9 +440,8 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
 
   // Quick whatsapp messenger
   const handleOpenWhatsApp = (entry: WeeklyConfirmationEntry) => {
-    const raw = getOnlyDigits(entry.phone);
-    if (!raw) return;
-    const phoneWithCountry = raw.startsWith('55') ? raw : `55${raw}`;
+    const phoneWithCountry = normalizePhone(entry.phone);
+    if (!phoneWithCountry) return;
     const firstWord = entry.name.split(' ')[0];
     const text = encodeURIComponent(
       `Olá ${firstWord}! Paz do Senhor! Tudo bem? Passando para saber de você e confirmar sua presença no culto deste fim de semana na Casa de Deus (${entry.congregation}). Esperamos você!`
@@ -516,6 +521,12 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{saveSuccessMessage}</span>
           </div>
+        </div>
+      )}
+
+      {saveError && (
+        <div role="alert" className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300">
+          {saveError}
         </div>
       )}
 
@@ -850,6 +861,11 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
                               >
                                 {entry.name}
                               </span>
+                              {entry.pendingSave && (
+                                <span className="text-[10px] text-amber-300 border border-amber-500/30 rounded px-1.5 py-0.5">
+                                  Pendente de salvar
+                                </span>
+                              )}
                               {matchingContact?.uniReino?.isEnrolled && (
                                 <UniReinoBadge
                                   enrollment={matchingContact.uniReino}
@@ -1052,6 +1068,11 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
                         >
                           {entry.name}
                         </h3>
+                        {entry.pendingSave && (
+                          <span className="text-[10px] text-amber-300 border border-amber-500/30 rounded px-1.5 py-0.5">
+                            Pendente de salvar
+                          </span>
+                        )}
                         {matchingContact?.uniReino?.isEnrolled && (
                           <UniReinoBadge
                             enrollment={matchingContact.uniReino}

@@ -4,6 +4,27 @@
 
 export const SAO_PAULO_TZ = 'America/Sao_Paulo';
 
+export function getDateStringInSaoPaulo(dateInput: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) return dateInput;
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: SAO_PAULO_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function isContactConfirmedThisWeek(
+  contact: { confirmedThisWeek?: boolean; confirmedWeekKey?: string },
+  weekKey: string = getWeekRangeForDate().weekKey
+): boolean {
+  return Boolean(contact.confirmedThisWeek && contact.confirmedWeekKey === weekKey);
+}
+
 const MONTH_NAMES_PT = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
@@ -111,15 +132,16 @@ export function isCurrentMonthInSP(dateInput?: string | null): boolean {
     let year: number;
     let month: number;
 
-    if (/^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
       const parts = dateInput.split('-');
       year = parseInt(parts[0], 10);
       month = parseInt(parts[1], 10) - 1;
     } else {
       const d = new Date(dateInput);
       if (isNaN(d.getTime())) return false;
-      const sp = getNowInSaoPaulo();
-      return d.getFullYear() === sp.getFullYear() && d.getMonth() === sp.getMonth();
+      const localDate = getDateStringInSaoPaulo(dateInput);
+      year = Number(localDate.slice(0, 4));
+      month = Number(localDate.slice(5, 7)) - 1;
     }
 
     const todaySP = getNowInSaoPaulo();

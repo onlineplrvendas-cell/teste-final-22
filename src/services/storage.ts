@@ -17,6 +17,7 @@ import {
   CongregationFilter,
 } from '../types';
 import { normalizePhone } from '../utils/phone';
+import { getWeekRangeForDate, isContactConfirmedThisWeek } from '../utils/date';
 import { firebaseErrorMessage, normalizeCongregations } from '../utils/userProfile';
 import { getUserPermissions } from '../utils/permissions';
 import {
@@ -87,9 +88,6 @@ export class PersistentDataManager {
         }
         if (!parsed.conexaoMonthlyResults) {
           parsed.conexaoMonthlyResults = this.storageKey.startsWith(REAL_STORAGE_KEY) ? generateEmptyConexaoMonthlyResults() : generateInitialConexaoMonthlyResults();
-        }
-        if (this.storageKey.startsWith(REAL_STORAGE_KEY) && (!parsed.conexaoParticipants || parsed.conexaoParticipants.length === 0)) {
-          parsed.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
         }
         if (!parsed.weeklyReports) {
           parsed.weeklyReports = this.initialFactory().weeklyReports || [];
@@ -195,19 +193,21 @@ export class PersistentDataManager {
   public updateContact(id: string, updates: Partial<Contact>): Contact {
     const idx = this.data.contacts.findIndex(c => c.id === id);
     if (idx === -1) throw new Error('Contato não encontrado');
+    const previous = this.data.contacts[idx];
     const updated: Contact = {
-      ...this.data.contacts[idx],
+      ...previous,
       ...updates,
       updatedAt: new Date().toISOString(),
     };
     this.data.contacts[idx] = updated;
 
-    if (updates.congregation && updates.congregation !== this.data.contacts[idx].congregation) {
+    if ((updates.congregation && updates.congregation !== previous.congregation) ||
+      (updates.curicicaFamily && updates.curicicaFamily !== previous.curicicaFamily)) {
       this.data.tasks = this.data.tasks.map(t =>
-        t.contactId === id ? { ...t, congregation: updates.congregation! } : t
+        t.contactId === id ? { ...t, congregation: updated.congregation, curicicaFamily: updated.congregation === 'Curicica' ? updated.curicicaFamily : undefined } : t
       );
       this.data.interactions = this.data.interactions.map(i =>
-        i.contactId === id ? { ...i, congregation: updates.congregation! } : i
+        i.contactId === id ? { ...i, congregation: updated.congregation, curicicaFamily: updated.congregation === 'Curicica' ? updated.curicicaFamily : undefined } : i
       );
     }
 
@@ -219,10 +219,11 @@ export class PersistentDataManager {
     const idx = this.data.contacts.findIndex(c => c.id === id);
     if (idx === -1) throw new Error('Contato não encontrado');
     const current = this.data.contacts[idx];
-    const newStatus = !current.confirmedThisWeek;
+    const newStatus = !isContactConfirmedThisWeek(current);
     return this.updateContact(id, {
       confirmedThisWeek: newStatus,
-      confirmedNotes: newStatus ? 'Confirmou presença para o culto desta semana' : undefined,
+      confirmedWeekKey: getWeekRangeForDate().weekKey,
+      confirmedNotes: newStatus ? 'Confirmou presença para o culto desta semana' : null,
     });
   }
 
@@ -316,8 +317,9 @@ export class PersistentDataManager {
     if (!this.data.conexaoParticipants) {
       this.data.conexaoParticipants = [];
     }
+    const normalizedContactPhone = contact.normalizedPhone || normalizePhone(contact.phone);
     const existingIdx = this.data.conexaoParticipants.findIndex(
-      p => p.contactId === id || (p.phone && p.phone === contact.phone)
+      p => p.contactId === id || (p.phone && normalizePhone(p.phone) === normalizedContactPhone)
     );
 
     if (existingIdx !== -1) {
@@ -390,6 +392,7 @@ export class PersistentDataManager {
     const newInt: Interaction = {
       ...interaction,
       id: newId,
+      curicicaFamily: this.data.contacts.find(contact => contact.id === interaction.contactId)?.curicicaFamily,
       createdAt: 'createdAt' in interaction && interaction.createdAt ? interaction.createdAt : now,
     };
     this.data.interactions = this.data.interactions.filter(i => i.id !== newInt.id);
@@ -404,6 +407,7 @@ export class PersistentDataManager {
     const newTask: Task = {
       ...task,
       id: newId,
+      curicicaFamily: this.data.contacts.find(contact => contact.id === task.contactId)?.curicicaFamily,
       createdAt: 'createdAt' in task && task.createdAt ? task.createdAt : now,
       updatedAt: 'updatedAt' in task && task.updatedAt ? task.updatedAt : now,
     };
@@ -600,9 +604,6 @@ export class PersistentDataManager {
       this.data.conexaoMonthlyResults = this.storageKey.startsWith(REAL_STORAGE_KEY) ? generateEmptyConexaoMonthlyResults() : generateInitialConexaoMonthlyResults();
       this.saveToStorage(this.data);
     }
-    if (this.storageKey.startsWith(REAL_STORAGE_KEY) && (!this.data.conexaoParticipants || this.data.conexaoParticipants.length === 0)) {
-      this.data.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
-    }
     return this.data.conexaoMonthlyResults;
   }
 
@@ -770,10 +771,13 @@ export const CRMService = {
       const constraints = profile.role === 'lider_familia'
         ? [...congregationConstraints, where('curicicaFamily', '==', profile.assignedCuricicaFamily)]
         : congregationConstraints;
+      const familyConstraints = profile.role === 'lider_familia'
+        ? [...congregationConstraints, where('curicicaFamily', '==', profile.assignedCuricicaFamily)]
+        : congregationConstraints;
       requests.push(collect('Contatos', async () => { changes.contacts = await read('contacts', constraints) as Contact[]; }));
-      requests.push(collect('Tarefas', async () => { changes.tasks = await read('tasks', congregationConstraints) as Task[]; }));
-      requests.push(collect('Interações', async () => { changes.interactions = await read('interactions', congregationConstraints) as Interaction[]; }));
-      requests.push(collect('Confirmações', async () => { changes.weeklyReports = await read('weekly_confirmations', congregationConstraints) as WeeklyConfirmationReport[]; }));
+      requests.push(collect('Tarefas', async () => { changes.tasks = await read('tasks', familyConstraints) as Task[]; }));
+      requests.push(collect('Interações', async () => { changes.interactions = await read('interactions', familyConstraints) as Interaction[]; }));
+      requests.push(collect('Confirmações', async () => { changes.weeklyReports = await read('weekly_confirmations', familyConstraints) as WeeklyConfirmationReport[]; }));
     } else {
       changes.contacts = []; changes.tasks = []; changes.interactions = []; changes.weeklyReports = [];
     }
@@ -787,15 +791,26 @@ export const CRMService = {
         }
         changes.conexaoGoals = goals;
       }));
+      requests.push(collect('Resultados mensais', async () => {
+        const monthlyResults = generateEmptyConexaoMonthlyResults();
+        const results = await read('conexao_monthly_results', constraints) as Array<{
+          color: ConexaoColor;
+          results: ConexaoMonthlyResult[];
+        }>;
+        results.forEach(item => {
+          if (item.color && Array.isArray(item.results)) monthlyResults[item.color] = item.results;
+        });
+        changes.conexaoMonthlyResults = monthlyResults;
+      }));
     } else {
       changes.conexaoParticipants = [];
       changes.conexaoGoals = generateInitialConexaoGoals();
+      changes.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
     }
     await Promise.all(requests);
     // A completed read from an older session must never replace the current user's data.
     if (requestRevision !== loadRevision || auth?.currentUser?.uid !== profile.uid) return;
     if (managerRevision !== realManager.getRevision()) throw new Error('Os dados foram alterados durante a consulta. Atualize novamente para concluir o carregamento.');
-    if (changes.conexaoParticipants?.length === 0) changes.conexaoMonthlyResults = generateEmptyConexaoMonthlyResults();
     // Only successfully read collections replace their cache; a failed read is not an empty collection.
     realManager.setAllData(changes);
     if (failures.length) throw new Error(failures.join(' '));
@@ -837,33 +852,79 @@ export const CRMService = {
     isDemo: boolean
   ): Promise<Contact> {
     if (isDemo) {
-      return demoManager.updateContact(id, updates);
+      const demoUpdates = updates.congregation && updates.congregation !== 'Curicica'
+        ? { ...updates, curicicaFamily: undefined }
+        : updates;
+      return demoManager.updateContact(id, demoUpdates);
     }
+
+    const previous = realManager.getContacts().find(contact => contact.id === id);
+    if (!previous) throw new Error('Contato não encontrado');
 
     if (requireRealSession()) {
       try {
-        const docRef = doc(db!, 'contacts', id);
-        await setDoc(docRef, cleanFirestoreData({ ...updates, updatedAt: new Date().toISOString() }), { merge: true });
+        const now = new Date().toISOString();
+        const nextCongregation = updates.congregation || previous.congregation;
+        const nextFamily = nextCongregation === 'Curicica' ? updates.curicicaFamily || previous.curicicaFamily : undefined;
+        const patch = cleanFirestoreData({
+          ...updates,
+          ...(updates.congregation && updates.congregation !== 'Curicica' ? { curicicaFamily: null } : {}),
+          updatedAt: now,
+        });
+        if ((updates.congregation && updates.congregation !== previous.congregation) ||
+          (updates.curicicaFamily && updates.curicicaFamily !== previous.curicicaFamily)) {
+          const related = await Promise.all(['tasks', 'interactions'].map(async collectionName => {
+            const constraints: QueryConstraint[] = [
+              where('contactId', '==', id),
+              where('congregation', '==', previous.congregation),
+            ];
+            if (previous.congregation === 'Curicica' && previous.curicicaFamily) {
+              constraints.push(where('curicicaFamily', '==', previous.curicicaFamily));
+            }
+            const snapshot = await getDocsFromServer(query(
+              collection(db!, collectionName),
+              ...constraints
+            ));
+            return { collectionName, docs: snapshot.docs };
+          }));
+          const batch = writeBatch(db!);
+          batch.set(doc(db!, 'contacts', id), patch, { merge: true });
+          related.forEach(({ collectionName, docs }) => {
+            docs.forEach(item => batch.set(doc(db!, collectionName, item.id), {
+              congregation: nextCongregation,
+              curicicaFamily: nextFamily || null,
+              updatedAt: now,
+            }, { merge: true }));
+          });
+          await batch.commit();
+        } else {
+          await setDoc(doc(db!, 'contacts', id), patch, { merge: true });
+        }
       } catch (error) {
         console.warn('Firestore update warning for contacts:', error);
         throw new Error(firebaseErrorMessage(error));
       }
     }
 
-    return realManager.updateContact(id, updates);
+    const realUpdates = updates.congregation && updates.congregation !== 'Curicica'
+      ? { ...updates, curicicaFamily: undefined }
+      : updates;
+    return realManager.updateContact(id, realUpdates);
   },
 
   async toggleWeeklyConfirmation(id: string, isDemo: boolean): Promise<Contact> {
     const manager = isDemo ? demoManager : realManager;
     const current = manager.getContacts().find(c => c.id === id);
     if (!current) throw new Error('Contato não encontrado');
-    const newStatus = !current.confirmedThisWeek;
+    const newStatus = !isContactConfirmedThisWeek(current);
+    const weekKey = getWeekRangeForDate().weekKey;
 
     if (!isDemo && requireRealSession()) {
       try {
         const docRef = doc(db!, 'contacts', id);
         await setDoc(docRef, cleanFirestoreData({
           confirmedThisWeek: newStatus,
+          confirmedWeekKey: weekKey,
           confirmedNotes: newStatus ? 'Confirmou presença para o culto desta semana' : null,
           updatedAt: new Date().toISOString(),
         }), { merge: true });
@@ -873,7 +934,11 @@ export const CRMService = {
       }
     }
 
-    return manager.toggleWeeklyConfirmation(id);
+    return manager.updateContact(id, {
+      confirmedThisWeek: newStatus,
+      confirmedWeekKey: weekKey,
+      confirmedNotes: newStatus ? 'Confirmou presença para o culto desta semana' : null,
+    });
   },
 
   async enrollInUniReino(
@@ -1043,8 +1108,19 @@ export const CRMService = {
   async deleteContactPermanent(id: string, isDemo: boolean): Promise<void> {
     if (!isDemo && requireRealSession()) {
       try {
-        const docRef = doc(db!, 'contacts', id);
-        await deleteDoc(docRef);
+        const related = await Promise.all(['tasks', 'interactions', 'conexao_participants'].map(async collectionName => {
+          const snapshot = await getDocsFromServer(query(
+            collection(db!, collectionName),
+            where('contactId', '==', id)
+          ));
+          return { collectionName, docs: snapshot.docs };
+        }));
+        const batch = writeBatch(db!);
+        related.forEach(({ collectionName, docs }) => {
+          docs.forEach(item => batch.delete(doc(db!, collectionName, item.id)));
+        });
+        batch.delete(doc(db!, 'contacts', id));
+        await batch.commit();
       } catch (error) {
         console.warn('Firestore deleteContactPermanent warning:', error);
         throw new Error(firebaseErrorMessage(error));
@@ -1068,6 +1144,7 @@ export const CRMService = {
     const interactionToSave: Interaction = {
       ...interaction,
       id: newId,
+      curicicaFamily: realManager.getContacts().find(contact => contact.id === interaction.contactId)?.curicicaFamily,
       createdAt: now,
     };
 
@@ -1098,6 +1175,7 @@ export const CRMService = {
     const taskToSave: Task = {
       ...task,
       id: newId,
+      curicicaFamily: realManager.getContacts().find(contact => contact.id === task.contactId)?.curicicaFamily,
       createdAt: now,
       updatedAt: now,
     };
@@ -1385,6 +1463,24 @@ export const CRMService = {
     isDemo: boolean
   ): Promise<void> {
     const manager = isDemo ? demoManager : realManager;
+    const results = manager.getConexaoMonthlyResults()[color];
+    if (!results?.[monthIndex]) return;
+
+    if (!isDemo && requireRealSession()) {
+      const updatedResults = results.map((result, index) => index === monthIndex
+        ? { ...result, ...updates }
+        : result);
+      try {
+        await setDoc(doc(db!, 'conexao_monthly_results', color), cleanFirestoreData({
+          color,
+          results: updatedResults,
+          updatedAt: new Date().toISOString(),
+        }), { merge: true });
+      } catch (error) {
+        console.warn('Firestore monthly results warning:', error);
+        throw new Error(firebaseErrorMessage(error));
+      }
+    }
     manager.updateConexaoMonthlyResult(color, monthIndex, updates);
   },
 
