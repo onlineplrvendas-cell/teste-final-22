@@ -123,18 +123,8 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
         filtered = filtered.filter(c => c.congregation === congFilter);
       }
 
-      // Priority: contacts marked confirmedThisWeek, or recent visitors/new contacts
-      const initialList = filtered.filter(c => {
-        // Include if explicitly confirmed or active in weekly process
-        if (c.confirmedThisWeek) return true;
-        if (c.stage === 'Aguardando primeiro contato' || c.stage === '1º contato feito' || c.stage === 'Em acompanhamento') {
-          return true;
-        }
-        return false;
-      });
-
-      // If list is small, also add a few members to accompany
-      const finalContacts = initialList.length > 0 ? initialList : filtered.slice(0, 10);
+      // Strictly include contacts marked confirmedThisWeek. Do not inject arbitrary unconfirmed members.
+      const finalContacts = filtered.filter(c => c.confirmedThisWeek);
 
       return finalContacts.map(c => ({
         contactId: c.id,
@@ -144,8 +134,8 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
         congregation: c.congregation,
         responsibleId: c.assignedToId,
         responsibleName: c.assignedToName || 'Não atribuído',
-        status: c.confirmedThisWeek ? 'confirmed' : 'unconfirmed',
-        absenceReason: c.confirmedThisWeek ? undefined : (c.initialNotes?.includes('Trabalho') ? 'Trabalho' : undefined),
+        status: 'confirmed',
+        absenceReason: undefined,
         updatedAt: new Date().toISOString(),
       }));
     },
@@ -159,7 +149,8 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
       r => r.weekKey === selectedWeekKey && (r.congregation === selectedCongregation || (selectedCongregation === 'all' && r.congregation === 'all'))
     );
 
-    if (existingReport && existingReport.entries && existingReport.entries.length > 0) {
+    // If a report exists (even if empty, i.e. entries was saved as []), honor it and don't re-populate
+    if (existingReport && Array.isArray(existingReport.entries)) {
       // Filter by congregation if needed
       let weekEntries = existingReport.entries;
       if (selectedCongregation !== 'all') {
@@ -250,9 +241,21 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
   };
 
   // Remove contact from week's list
-  const handleRemoveEntry = (contactId: string) => {
+  const handleRemoveEntry = async (contactId: string) => {
     setEntries(prev => prev.filter(e => e.contactId !== contactId));
     setHasUnsavedChanges(true);
+
+    // If current week, immediately sync contact status so it clears from the confirmed list across all views
+    if (activeWeekRange.isCurrentWeek) {
+      try {
+        await updateContact(contactId, {
+          confirmedThisWeek: false,
+          confirmedNotes: undefined,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar status do contato ao remover:', err);
+      }
+    }
   };
 
   // Save current week's confirmation report
@@ -274,6 +277,32 @@ export const ConfirmadosSemanaPage: React.FC<ConfirmadosSemanaPageProps> = ({
       };
 
       await saveWeeklyReport(report);
+
+      // If current week, strictly synchronize confirmedThisWeek state on all scoped contacts
+      if (activeWeekRange.isCurrentWeek) {
+        const confirmedEntryIds = new Set(
+          entries.filter(e => e.status === 'confirmed').map(e => e.contactId)
+        );
+        const scopedContactsToSync = contacts.filter(c => {
+          if (c.isArchived) return false;
+          if (selectedCongregation !== 'all' && c.congregation !== selectedCongregation) return false;
+          return true;
+        });
+
+        // Update any contact whose status differs from the saved entries
+        await Promise.all(
+          scopedContactsToSync.map(async c => {
+            const shouldBeConfirmed = confirmedEntryIds.has(c.id);
+            if (c.confirmedThisWeek !== shouldBeConfirmed) {
+              await updateContact(c.id, {
+                confirmedThisWeek: shouldBeConfirmed,
+                confirmedNotes: shouldBeConfirmed ? 'Confirmado para o culto da semana' : undefined,
+              });
+            }
+          })
+        );
+      }
+
       setHasUnsavedChanges(false);
       setSaveSuccessMessage('Relatório da semana gravado com sucesso no histórico!');
       setTimeout(() => {
